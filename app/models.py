@@ -1,0 +1,71 @@
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, func
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.database import Base
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    username: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    token_id: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class BotRuntimeConfig(Base):
+    __tablename__ = "bot_runtime_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    bot_status: Mapped[str] = mapped_column(String(32), default="idle", nullable=False)
+    emergency_stop: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    execution_mode: Mapped[str] = mapped_column(String(16), default="demo", nullable=False)
+    auto_trading_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class TradeJournal(Base):
+    __tablename__ = "trade_journal"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    journal_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    symbol: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
+    direction: Mapped[str] = mapped_column(String(16), nullable=False)
+    execution_mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False)
+    stop_loss: Mapped[float] = mapped_column(Float, nullable=False)
+    take_profit: Mapped[float] = mapped_column(Float, nullable=False)
+    quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="active", nullable=False)
+    result: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    sl_hit_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    order_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    detected_at: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    opened_at: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    closed_at: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    exchange_metadata: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class BotEvent(Base):
+    __tablename__ = "bot_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_type: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    level: Mapped[str] = mapped_column(String(16), default="info", nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    event_metadata: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
