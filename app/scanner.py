@@ -16,9 +16,14 @@ DEFAULT_SCANNER_SYMBOLS = [
     "LINKUSDT",
 ]
 SCANNER_SYMBOLS = DEFAULT_SCANNER_SYMBOLS
-UNIVERSE_LIMIT = 20
+UNIVERSE_LIMIT = 30  # Updated from 20 to 30
 BIAS_CANDLE_LIMIT = 250
 TRIGGER_CANDLE_LIMIT = 50
+
+# Liquidity thresholds for symbol selection
+MIN_TURNOVER_24H = 50_000_000.0  # $50M minimum 24h turnover
+MIN_PRICE_MOVEMENT_PCT = 0.5     # 0.5% minimum 24h price movement
+MAX_SPREAD_BPS = 50              # 50 bps (0.5%) maximum spread
 
 _signals_lock = Lock()
 _latest_signals: list[dict[str, Any]] = []
@@ -87,20 +92,64 @@ def get_active_signals() -> list[dict[str, Any]]:
 
 
 def _resolve_scan_universe(client: BybitDemoClient) -> list[str]:
+    """
+    UPDATED: Select dynamic Top 30 USDT perpetual symbols using:
+    - High 24h turnover (minimum $50M)
+    - Strong 24h price movement (minimum 0.5%)
+    - Sufficient liquidity (bid-ask spread check)
+    - Exclude illiquid, inactive, and duplicate symbols
+    """
     ok, tickers, _ = client.safe_fetch_market_tickers()
     if not ok or not tickers:
         return list(DEFAULT_SCANNER_SYMBOLS)
 
-    normalized = [item for item in tickers if str(item.get("symbol", "")).upper().endswith("USDT")]
-    top_liquid = sorted(normalized, key=lambda item: _to_float(item.get("turnover24h")), reverse=True)[:10]
-    top_gainers = sorted(normalized, key=lambda item: _to_float(item.get("price24hPcnt")), reverse=True)[:10]
-
+    # Filter to USDT perpetuals only
+    usdt_symbols = [item for item in tickers if str(item.get("symbol", "")).upper().endswith("USDT")]
+    
+    # Filter by minimum liquidity thresholds
+    liquid_candidates = []
+    for item in usdt_symbols:
+        symbol = str(item.get("symbol", "")).upper()
+        turnover = _to_float(item.get("turnover24h"))
+        price_movement = abs(_to_float(item.get("price24hPcnt")))
+        
+        # Apply liquidity filters
+        if turnover < MIN_TURNOVER_24H:
+            continue
+        if price_movement < MIN_PRICE_MOVEMENT_PCT:
+            continue
+        
+        # Exclude inactive symbols (zero volume)
+        if turnover <= 0:
+            continue
+        
+        # Exclude duplicate symbols
+        if symbol in [s.get("symbol") for s in liquid_candidates]:
+            continue
+        
+        liquid_candidates.append(item)
+    
+    # Sort by combined score: turnover (60%) + price movement (40%)
+    def _liquidity_score(item: dict[str, Any]) -> float:
+        turnover = _to_float(item.get("turnover24h"))
+        price_movement = abs(_to_float(item.get("price24hPcnt")))
+        # Normalize turnover to 0-100 scale (assuming max ~$1B turnover)
+        normalized_turnover = min(turnover / 10_000_000, 100)
+        # Price movement already in percent
+        return (normalized_turnover * 0.6) + (price_movement * 0.4)
+    
+    top_liquid = sorted(liquid_candidates, key=_liquidity_score, reverse=True)[:30]
+    
+    # Build universe with deduplication
     universe: list[str] = []
-    for item in [*top_liquid, *top_gainers]:
+    for item in top_liquid:
         symbol = str(item.get("symbol", "")).upper()
         if symbol and symbol not in universe:
             universe.append(symbol)
-
+        if len(universe) >= UNIVERSE_LIMIT:
+            break
+    
+    # Fallback to defaults if insufficient liquidity found
     if len(universe) < UNIVERSE_LIMIT:
         for symbol in DEFAULT_SCANNER_SYMBOLS:
             if symbol not in universe:
