@@ -144,6 +144,21 @@ def get_closed_trade_history(limit: int = 100) -> list[dict[str, Any]]:
         db.close()
 
 
+def get_open_trade_history(limit: int = 100) -> list[dict[str, Any]]:
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(TradeJournal)
+            .filter(TradeJournal.status != "closed")
+            .order_by(desc(TradeJournal.id))
+            .limit(limit)
+            .all()
+        )
+        return [serialize_trade_entry(row) for row in rows]
+    finally:
+        db.close()
+
+
 def get_bot_events(limit: int = 100) -> list[dict[str, Any]]:
     db = SessionLocal()
     try:

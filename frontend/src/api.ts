@@ -89,6 +89,8 @@ type BackendTrade = {
   result?: string | null;
   sl_hit_reason?: string | null;
   closed_at?: string | null;
+  opened_at?: string | null;
+  detected_at?: string | null;
   execution_mode?: "demo" | "live";
   journal_id?: string;
   exit_price?: number | null;
@@ -167,7 +169,7 @@ function toUiTrade(item: BackendTrade, index: number): Trade {
     unrealizedPnl: 0,
     pnlPercent: 0,
     status: item.status === "closed" ? "CLOSED" : "OPEN",
-    timestamp: item.closed_at || new Date().toISOString(),
+    timestamp: item.opened_at || item.detected_at || item.closed_at || new Date().toISOString(),
     orderConfirmed: Boolean(item.order_id),
     slVerified: item.status !== "protection_pending",
     tpVerified: item.status !== "protection_pending",

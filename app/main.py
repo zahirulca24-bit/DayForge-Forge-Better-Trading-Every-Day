@@ -20,9 +20,9 @@ from app.bot_controls import (
 from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.dependencies import require_authenticated
-from app.execution import execute_signal, get_active_trades, get_closed_trades
+from app.execution import execute_signal, get_active_trades, get_closed_trades, replace_active_trades
 from app.exchange import get_exchange_client
-from app.journal import get_bot_events, get_closed_trade_history, get_trade_history, log_bot_event
+from app.journal import get_bot_events, get_closed_trade_history, get_open_trade_history, get_trade_history, log_bot_event
 from app.metrics import get_metrics, get_portfolio_summary
 from app.middleware import AuthMiddleware
 from app.models import UserSession
@@ -59,6 +59,8 @@ async def on_startup() -> None:
     global _background_task
     Base.metadata.create_all(bind=engine)
     ensure_runtime_config()
+    if not get_active_trades():
+        replace_active_trades(get_open_trade_history())
     if _background_task is None or _background_task.done():
         _background_task = asyncio.create_task(auto_trading_loop())
 
@@ -372,7 +374,12 @@ def execute(payload: ExecuteSignalRequest, _: dict = Depends(require_authenticat
 
 @app.get("/active-trades")
 def active_trades(_: dict = Depends(require_authenticated)) -> dict:
-    return {"trades": get_active_trades()}
+    trades = get_active_trades()
+    if not trades:
+        trades = get_open_trade_history()
+        if trades:
+            replace_active_trades(trades)
+    return {"trades": trades}
 
 
 @app.get("/trade-history")
