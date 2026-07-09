@@ -28,7 +28,18 @@ jobs:
         run: python -m compileall -q app tests
 
       - name: Run backend tests
-        run: python -m unittest discover -s tests -p "test_*.py" -v
+        id: backend_tests
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -p "test_*.py" -v 2>&1 | tee backend-tests.log
+
+      - name: Upload backend logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-logs
+          path: backend-tests.log
 
   frontend:
     runs-on: ubuntu-latest
@@ -50,7 +61,18 @@ jobs:
         run: npm ci
 
       - name: TypeScript check
-        run: npm run lint
+        id: typescript_check
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run lint 2>&1 | tee typescript-check.log
+
+      - name: Upload TypeScript logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-typescript-logs
+          path: frontend/typescript-check.log
 
       - name: Build frontend
         run: npm run build
