@@ -319,7 +319,9 @@ export default function App() {
             tradeHistory={tradeHistory}
             lastSync={lastSync}
             isStale={isStale}
+            actionLoading={actionLoading}
             onRefreshAll={() => fetchAllData()}
+            onStartEngine={() => authToken ? runAction("bot-start", () => api.startBot(authToken)) : Promise.resolve()}
           />
         );
       case "signal-engine":

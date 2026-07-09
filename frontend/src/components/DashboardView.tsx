@@ -19,6 +19,8 @@ import {
   Clock3,
   Coins,
   Layers3,
+  Play,
+  RefreshCw,
   RadioTower,
   ShieldCheck,
   Wallet,
@@ -34,7 +36,9 @@ interface DashboardViewProps {
   tradeHistory: TradeHistoryEntry[];
   lastSync?: Date | null;
   isStale?: boolean;
+  actionLoading?: string | null;
   onRefreshAll: () => void;
+  onStartEngine: () => Promise<void>;
 }
 
 const BDT_DATE_TIME = new Intl.DateTimeFormat("en-BD", {
@@ -124,7 +128,9 @@ export default function DashboardView({
   tradeHistory,
   lastSync,
   isStale,
+  actionLoading,
   onRefreshAll,
+  onStartEngine,
 }: DashboardViewProps) {
   const wallet = account.wallet.data || {};
   const totalEquity = numberValue(wallet.totalEquity || wallet.totalWalletBalance || wallet.totalMarginBalance);
@@ -248,11 +254,33 @@ export default function DashboardView({
             </span>
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-3 shrink-0" id="dashboard-status-indicator">
+        <div className="flex w-full flex-col gap-3 xl:w-auto xl:items-end" id="dashboard-status-indicator">
+          <div className="flex w-full flex-col gap-2 sm:flex-row xl:w-auto">
+            <button
+              type="button"
+              onClick={onStartEngine}
+              disabled={actionLoading === "bot-start"}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/20 disabled:opacity-50 sm:w-auto"
+            >
+              <Play className="h-4 w-4" />
+              <span>{actionLoading === "bot-start" ? "STARTING..." : "START ENGINE"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={onRefreshAll}
+              disabled={actionLoading === "bot-start"}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-800 bg-[#0A0B0E] px-4 py-3 text-xs font-semibold text-slate-300 transition-colors hover:border-slate-700 hover:text-white disabled:opacity-50 sm:w-auto"
+            >
+              <RefreshCw className="h-4 w-4" />
+              <span>REFRESH</span>
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
           <StatusPill label="Bot" value={botStatus.status.toUpperCase()} tone={botStatus.status === "running" ? "good" : "muted"} />
           <StatusPill label="Readiness" value={readiness.ready_for_execution ? "READY" : "BLOCKED"} tone={readiness.ready_for_execution ? "good" : "warn"} />
           <StatusPill label="Mode" value={(botStatus.execution_mode || "demo").toUpperCase()} tone={(botStatus.execution_mode || "demo") === "live" ? "warn" : "good"} />
           <StatusPill label="Symbol" value={selectedSymbol} tone="muted" />
+          </div>
         </div>
       </div>
 
