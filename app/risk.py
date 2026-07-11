@@ -51,8 +51,9 @@ def validate_trade(signal: dict[str, Any]) -> dict[str, Any]:
     settings = get_risk_settings()
     now = datetime.now(UTC)
     with _risk_lock:
-        changed = _reset_daily_state_if_needed(now) or _expire_cooldown_if_needed(now)
-        if changed:
+        day_changed = _reset_daily_state_if_needed(now)
+        cooldown_changed = _expire_cooldown_if_needed(now)
+        if day_changed or cooldown_changed:
             _persist_state_locked()
 
         if _cooldown_until and now < _cooldown_until:
@@ -78,8 +79,9 @@ def get_risk_state() -> dict[str, Any]:
     now = datetime.now(UTC)
     settings = get_risk_settings()
     with _risk_lock:
-        changed = _reset_daily_state_if_needed(now) or _expire_cooldown_if_needed(now)
-        if changed:
+        day_changed = _reset_daily_state_if_needed(now)
+        cooldown_changed = _expire_cooldown_if_needed(now)
+        if day_changed or cooldown_changed:
             _persist_state_locked()
         return {
             "risk_per_trade": settings["risk_per_trade"],
