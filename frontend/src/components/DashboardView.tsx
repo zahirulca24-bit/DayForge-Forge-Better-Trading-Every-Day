@@ -9,6 +9,7 @@ import {
   Trade,
   TradeHistoryEntry,
 } from "../types";
+import { fetchSignalTruth, TruthSignal } from "../signalTruth";
 import {
   AlertTriangle,
   ArrowDownRight,
@@ -85,7 +86,8 @@ function formatPnlPercent(value: number) {
 
 function formatBdtDateTime(value?: string | Date | null) {
   if (!value) return "Not synced";
-  return BDT_DATE_TIME.format(new Date(value));
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? "Not synced" : BDT_DATE_TIME.format(date);
 }
 
 function isTodayInBdt(value?: string | null) {
@@ -147,14 +149,42 @@ export default function DashboardView({
   );
   const todayNetPnl = todayRealizedPnl + unrealizedPnl;
   const recentTrades = useMemo(() => activeTrades.slice(0, 4), [activeTrades]);
-  const recentSignals = useMemo(() => signals.slice(0, 5), [signals]);
 
+  const [truthSignals, setTruthSignals] = useState<TruthSignal[]>([]);
+  const [signalTruthError, setSignalTruthError] = useState<string | null>(null);
   const [overview, setOverview] = useState<{
     top_gainers: MarketTicker[];
     watchlist: MarketTicker[];
     server_time: string | null;
   }>({ top_gainers: [], watchlist: [], server_time: null });
   const [marketError, setMarketError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!authToken) return;
+    let cancelled = false;
+
+    const loadSignalTruth = async () => {
+      try {
+        const payload = await fetchSignalTruth(authToken);
+        if (!cancelled) {
+          setTruthSignals(payload.activeSignals.slice(0, 5));
+          setSignalTruthError(null);
+        }
+      } catch (error: any) {
+        if (!cancelled) {
+          setTruthSignals([]);
+          setSignalTruthError(error?.message || "Canonical signal data is unavailable.");
+        }
+      }
+    };
+
+    void loadSignalTruth();
+    const interval = setInterval(loadSignalTruth, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [authToken, signals.length]);
 
   useEffect(() => {
     if (!authToken) return;
@@ -177,7 +207,7 @@ export default function DashboardView({
     };
 
     void loadOverview();
-    const interval = setInterval(loadOverview, 15000);
+    const interval = setInterval(loadOverview, 15_000);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -267,40 +297,51 @@ export default function DashboardView({
                 ))}
               </div>
             ) : (
-              <EmptyState icon={<Target className="h-5 w-5" />} title="No active trades" text="Start the engine and wait for a validated signal. New positions will appear here." />
+              <EmptyState icon={<Target className="h-5 w-5" />} title="No active trades" text="Start the engine and wait for a validated ACTIVE signal. New positions will appear here." />
             )}
           </Panel>
 
-          <Panel title="Latest Signals" subtitle="Most recent validated opportunities from the scanner." badge={`${signals.length} active`}>
-            {recentSignals.length > 0 ? (
+          <Panel title="Latest Primary Signals" subtitle="Canonical ACTIVE signals only. NEAR_SETUP remains monitor-only on Signal Engine." badge={`${truthSignals.length} ACTIVE`}>
+            {signalTruthError && (
+              <div className="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-300">
+                {signalTruthError}
+              </div>
+            )}
+            {truthSignals.length > 0 ? (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[680px] text-left">
+                <table className="w-full min-w-[760px] text-left">
                   <thead className="border-b border-slate-800 text-[10px] font-mono uppercase tracking-wider text-slate-500">
                     <tr>
                       <th className="px-3 py-3">Symbol</th>
                       <th className="px-3 py-3">Side</th>
-                      <th className="px-3 py-3">Strategy</th>
-                      <th className="px-3 py-3">Grade</th>
+                      <th className="px-3 py-3">Strategy / Profile</th>
+                      <th className="px-3 py-3">Market Rank</th>
+                      <th className="px-3 py-3">Signal Rank</th>
                       <th className="px-3 py-3">RR</th>
-                      <th className="px-3 py-3 text-right">Status</th>
+                      <th className="px-3 py-3 text-right">State</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/70">
-                    {recentSignals.map((signal) => (
+                    {truthSignals.map((signal) => (
                       <tr key={signal.id} className="text-xs text-slate-300">
-                        <td className="px-3 py-3 font-semibold text-white">{signal.pair}</td>
-                        <td className={`px-3 py-3 font-mono ${signal.direction === "LONG" ? "text-emerald-400" : "text-rose-400"}`}>{signal.direction}</td>
-                        <td className="px-3 py-3 text-slate-400">{signal.indicator || "Strategy signal"}</td>
-                        <td className="px-3 py-3"><span className="rounded-md border border-sky-500/20 bg-sky-500/10 px-2 py-1 font-mono text-sky-300">{signal.grade}</span></td>
-                        <td className="px-3 py-3 font-mono text-white">{numberValue(signal.rr).toFixed(2)}R</td>
-                        <td className="px-3 py-3 text-right font-mono text-[10px] text-slate-400">{signal.executionStatus}</td>
+                        <td className="px-3 py-3 font-semibold text-white">{signal.symbol}</td>
+                        <td className={`px-3 py-3 font-mono ${signal.direction === "LONG" ? "text-emerald-400" : "text-rose-400"}`}>{signal.direction || "N/A"}</td>
+                        <td className="px-3 py-3 text-slate-400">
+                          {signal.strategyName} <span className="text-slate-600">/</span> <span className="capitalize">{signal.tradeType || "N/A"}</span>
+                        </td>
+                        <td className="px-3 py-3 font-mono text-slate-300">{signal.marketRank ?? "N/A"}</td>
+                        <td className="px-3 py-3 font-mono text-slate-300">{signal.signalRank ?? "N/A"}</td>
+                        <td className="px-3 py-3 font-mono text-white">{signal.riskReward === null ? "N/A" : `${signal.riskReward.toFixed(2)}R`}</td>
+                        <td className="px-3 py-3 text-right">
+                          <span className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 font-mono text-[10px] text-emerald-300">{signal.signalState}</span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             ) : (
-              <EmptyState icon={<RadioTower className="h-5 w-5" />} title="No active signals" text="The scanner is waiting for a setup that passes strategy and risk validation." />
+              <EmptyState icon={<RadioTower className="h-5 w-5" />} title="No ACTIVE primary signals" text="No signal is currently eligible to proceed to the Risk gate. Developing NEAR_SETUP signals remain visible on Signal Engine." />
             )}
           </Panel>
         </div>
