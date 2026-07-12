@@ -4,12 +4,12 @@ Bybit-first automated trading terminal built with **FastAPI, React, PostgreSQL a
 
 The project is currently in **Demo Beta / Engineering Verification**. Live-capital trading is not approved.
 
-> **Last documentation update:** 12 July 2026, 11:52 PM BDT (`Asia/Dhaka`)  
+> **Last documentation update:** 13 July 2026, 12:06 AM BDT (`Asia/Dhaka`)  
 > **Latest `main` commit:** `22e6f2d4f3b13442cf85c8ae067a4af5dfe30169` — README PR #31 merged  
-> **Active branch:** `fix/scalping-tp2-profit-lock-retry`  
-> **Active pull request:** PR #32  
-> **Current task:** Step 1 — Scalping TP2 → TP1-price SL profit-lock repair  
-> **Next task:** Step 2 — Partial-close Journal, fees and realized-PnL synchronization  
+> **Active branch:** `fix/partial-close-journal-pnl-sync`  
+> **Active pull request:** PR #33 — stacked on Step 1 PR #32  
+> **Current task:** Step 2 — Partial-close Journal, fees and realized-PnL synchronization  
+> **Next task:** Step 3 — Authoritative strategy/profile metadata recovery  
 > **Live trading:** blocked by default
 
 ---
@@ -203,8 +203,8 @@ A green CI run does not prove exchange/runtime behavior.
 | Step | Task | Status |
 |---:|---|---|
 | 0 | Close README structure and runtime-audit PR | **Complete** |
-| 1 | Fix Scalping TP2 → TP1-price SL profit lock | **Active — CI passed, merge pending** |
-| 2 | Fix partial-fill reconciliation, fees and realized PnL | Pending |
+| 1 | Fix Scalping TP2 → TP1-price SL profit lock | **Automated PASS — PR #32 merge/deploy pending** |
+| 2 | Fix partial-fill reconciliation, fees and realized PnL | **Active — PR #33 CI pending** |
 | 3 | Recover authoritative strategy/profile metadata | Pending |
 | 4 | Correct TP labels and Risk/daily-trade UI values | Pending |
 | 5 | Reproduce and fix blank-page failure | Pending |
@@ -274,42 +274,75 @@ Implemented in PR #32:
 | Check | Result | Evidence |
 |---|---|---|
 | Focused retry/idempotency tests | **PASS** | New tests included in backend suite |
-| Backend compile | **PASS** | GitHub Actions run #238 |
+| Backend compile | **PASS** | GitHub Actions run #240 |
 | Full backend suite | **PASS** | **184/184 tests passed** |
-| Frontend TypeScript check | **PASS** | GitHub Actions run #238 |
-| Frontend production build | **PASS** | GitHub Actions run #238 |
-| CI | **PASS** | Run #238 completed successfully |
+| Frontend TypeScript check | **PASS** | GitHub Actions run #240 |
+| Frontend production build | **PASS** | GitHub Actions run #240 |
+| CI | **PASS** | Run #240 completed successfully |
 | Deployed Bybit Demo verification | **PENDING** | Requires merge and deployment |
+
+---
+
+## 13 July 2026 — Monday
+
+### Timeline
+
+- **12:06 AM BDT:** Step 2 bounded branch and stacked PR #33 created from the Step 1 branch.
+- **12:06 AM BDT:** Partial-close Journal/PnL synchronization implementation and focused tests added.
+
+### Step 2 — Partial-close Journal, fees and realized-PnL repair
+
+**Confirmed code-level failure modes:**
+
+1. Partial close evidence was persisted only inside `exchange_metadata`.
+2. Active Journal columns `realized_pnl`, `fees` and `exit_price` stayed empty while the runner remained open.
+3. Existing metadata could make later cycles skip even when visible Journal columns were still stale.
+4. Synchronization relied mainly on local TP flags instead of exchange quantity reduction/order status evidence.
+5. Missing Bybit fee fields were converted to zero, which could falsely imply exact fee synchronization.
+
+Implemented in PR #33:
+
+- Persists exact cumulative `closedPnl`, `openFee`, `closeFee`, weighted exit price and remaining quantity into Journal columns.
+- Retains BDT-day PnL and fee allocation in metadata for Risk Engine accounting.
+- Adds one stable, idempotent lifecycle event for each newly discovered partial-close record.
+- Repairs stale visible Journal fields from previously stored exact exchange evidence.
+- Recognizes exchange quantity reduction and filled native-order status before local TP flags catch up.
+- Rejects “exact fee synchronized” status when `openFee` or `closeFee` is unavailable.
+- Deduplicates Bybit records with stable record keys.
+- Leaves final full-close synchronization as the final authority after the runner exits.
+
+### Step 2 automated evidence
+
+| Check | Result | Evidence |
+|---|---|---|
+| Root cause and bounded scope | **PASS** | PR #33 description and branch diff |
+| Focused tests added | **PASS** | `tests/test_partial_close_journal_sync.py` |
+| Focused tests executed | **PENDING** | Awaiting PR #33 CI |
+| Backend compile | **PENDING** | Awaiting PR #33 CI |
+| Full backend suite | **PENDING** | Awaiting PR #33 CI |
+| Frontend TypeScript/build | **PENDING** | Awaiting PR #33 CI |
+| CI | **PENDING** | PR #33 current-head run required |
+| Product Owner merge approval | **PENDING** | No merge requested or performed |
+| Deployed Bybit Demo verification | **PENDING** | Required after Step 1 and Step 2 merge/deploy |
 
 ### Current gate-based progress
 
 | Work item | Completed gates | Progress | Current status |
 |---|---:|---:|---|
 | README PR #31 closure | 5/5 | **100%** | Merged to `main` |
-| Scalping deployed lifecycle verification | 4/10 | **40%** | TP2 protection and downstream evidence failed/pending |
-| Step 1 TP2 profit-lock repair | 7/8 | **87.5%** | Code and CI passed; Product Owner merge approval pending |
-| Step 2 Journal, fees and realized-PnL repair | 0/6 | **0%** | Not started |
+| Scalping deployed lifecycle verification | 4/10 | **40%** | Runtime repair/deployment still required |
+| Step 1 TP2 profit-lock repair | 7/8 | **87.5%** | Code and CI passed; merge/deploy pending |
+| Step 2 Journal, fees and realized-PnL repair | 4/9 | **44.4%** | Root cause, branch, implementation and tests added; CI pending |
 | Step 3 metadata recovery | 0/5 | **0%** | Not started |
 | Step 4 TP-stage/Risk UI consistency | 0/5 | **0%** | Not started |
 | Step 5 blank-page stability | 0/4 | **0%** | Root cause not confirmed |
 | Intraday lifecycle verification | 0/8 | **0%** | Not started |
 | Restart/cleanup/orphan-order verification | 0/6 | **0%** | Not started |
 
-### Step 1 completion gates
-
-- [x] Runtime defect documented.
-- [x] Code-level no-retry failure mode confirmed.
-- [x] Bounded branch and implementation created.
-- [x] Focused tests added.
-- [x] Focused tests executed successfully.
-- [x] Full backend suite and frontend checks passed.
-- [x] GitHub Actions CI passed.
-- [ ] Product Owner approved merge to `main`.
-
 ### Current verdict
 
-Step 1 implementation and automated verification are **PASS**. Runtime verification is still **PENDING** because the code has not yet been merged and deployed.
+Step 2 implementation exists on stacked PR #33, but no automated PASS is claimed until the current-head CI run completes. `main` remains unchanged.
 
 ### Next task
 
-> **Step 2 — Fix partial-close Journal, fees and realized-PnL synchronization.**
+> **Step 3 — Recover authoritative strategy/profile metadata and lifecycle timestamps after Step 2 automated closure.**
