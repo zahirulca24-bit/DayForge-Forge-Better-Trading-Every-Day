@@ -2,6 +2,7 @@ from threading import Lock
 from typing import Any
 
 from app.exchange import BybitDemoClient
+from app.market_quality import MAX_SPREAD_BPS, validate_spread
 from app.strategy import evaluate_registered_strategies
 
 
@@ -42,10 +43,9 @@ UNIVERSE_LIMIT = 30
 BIAS_CANDLE_LIMIT = 250
 TRIGGER_CANDLE_LIMIT = 50
 
-# Liquidity thresholds for symbol selection.
+# Liquidity and execution-quality thresholds for symbol selection.
 MIN_TURNOVER_24H = 50_000_000.0
 MIN_PRICE_MOVEMENT_RATIO = 0.005
-MAX_SPREAD_BPS = 50
 
 _signals_lock = Lock()
 _latest_signals: list[dict[str, Any]] = []
@@ -106,6 +106,7 @@ def run_scan(client: BybitDemoClient) -> dict[str, Any]:
         "signals": list(signals),
         "results": list(scan_results),
         "skipped": skipped,
+        "max_spread_bps": MAX_SPREAD_BPS,
     }
 
 
@@ -122,9 +123,16 @@ def get_active_signals() -> list[dict[str, Any]]:
 def _resolve_scan_universe(client: BybitDemoClient) -> list[str]:
     ok, tickers, _ = client.safe_fetch_market_tickers()
     if not ok or not tickers:
+        # Scanner cannot assess spread when market tickers are unavailable. The
+        # execution boundary still rejects every trade without a verified spread.
         return list(DEFAULT_SCANNER_SYMBOLS[:UNIVERSE_LIMIT])
 
     usdt_symbols = [item for item in tickers if str(item.get("symbol", "")).upper().endswith("USDT")]
+    tickers_by_symbol = {
+        str(item.get("symbol") or "").upper(): item
+        for item in usdt_symbols
+        if str(item.get("symbol") or "").strip()
+    }
 
     liquid_candidates: list[dict[str, Any]] = []
     seen_symbols: set[str] = set()
@@ -132,7 +140,10 @@ def _resolve_scan_universe(client: BybitDemoClient) -> list[str]:
         symbol = str(item.get("symbol", "")).upper()
         turnover = _to_float(item.get("turnover24h"))
         price_movement_ratio = _normalize_price_movement_ratio(item.get("price24hPcnt"))
+        spread_gate = validate_spread(item)
         if not symbol or symbol in seen_symbols:
+            continue
+        if not spread_gate.get("allowed"):
             continue
         if turnover < MIN_TURNOVER_24H:
             continue
@@ -152,6 +163,9 @@ def _resolve_scan_universe(client: BybitDemoClient) -> list[str]:
 
     if len(universe) < UNIVERSE_LIMIT:
         for symbol in DEFAULT_SCANNER_SYMBOLS:
+            ticker = tickers_by_symbol.get(symbol)
+            if ticker is None or not validate_spread(ticker).get("allowed"):
+                continue
             if symbol not in universe:
                 universe.append(symbol)
             if len(universe) >= UNIVERSE_LIMIT:
@@ -165,7 +179,9 @@ def _liquidity_score(item: dict[str, Any]) -> float:
     price_movement_ratio = _normalize_price_movement_ratio(item.get("price24hPcnt"))
     normalized_turnover = min(turnover / 10_000_000, 100)
     normalized_price_move = price_movement_ratio * 100
-    return (normalized_turnover * 0.6) + (normalized_price_move * 0.4)
+    spread_gate = validate_spread(item)
+    spread_penalty = float(spread_gate.get("spread_bps") or MAX_SPREAD_BPS) / max(MAX_SPREAD_BPS, 1.0)
+    return (normalized_turnover * 0.6) + (normalized_price_move * 0.4) - spread_penalty
 
 
 def _normalize_price_movement_ratio(value: Any) -> float:

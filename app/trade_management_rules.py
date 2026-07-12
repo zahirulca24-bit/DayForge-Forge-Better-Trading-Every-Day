@@ -4,8 +4,15 @@ from datetime import UTC, datetime
 from math import isfinite
 from typing import Any
 
+from app.trade_management_profiles import (
+    is_profiled_management,
+    is_scalping_management,
+    max_hold_seconds,
+    progress_r,
+    trailing_enabled,
+)
 
-MAX_HOLD_SECONDS = 4 * 60 * 60
+
 STAGNANT_SECONDS = 60 * 60
 
 
@@ -17,34 +24,51 @@ def evaluate_management_action(trade: dict[str, Any], mark_price: float, now: da
     opened_at = _parse_time(trade.get("opened_at")) or now
     age_seconds = (now - opened_at).total_seconds()
 
-    if age_seconds >= MAX_HOLD_SECONDS:
+    if age_seconds >= max_hold_seconds(management):
         return {"action": "max_hold_close"}
 
     risk = abs(entry - stop_loss)
     if risk <= 0 or direction not in {"long", "short"}:
         return {"action": "hold"}
 
-    progress_r = ((mark_price - entry) / risk) if direction == "long" else ((entry - mark_price) / risk)
-    if age_seconds >= STAGNANT_SECONDS and progress_r < 0.25:
+    current_progress_r = progress_r(
+        entry=entry,
+        stop_loss=stop_loss,
+        direction=direction,
+        mark_price=mark_price,
+    )
+    if age_seconds >= STAGNANT_SECONDS and current_progress_r < 0.25:
         return {"action": "stagnant_close"}
 
     tp1_done = bool(management.get("tp1_done"))
     tp2_done = bool(management.get("tp2_done"))
     break_even_set = bool(management.get("break_even_set"))
     trailing_stop = _to_float(management.get("trailing_stop"), None)
+    profit_lock_stop = _to_float(management.get("profit_lock_stop"), None)
+
+    # Scalping protects the trade at 1R before TP1. Intraday keeps the existing
+    # TP1-fill -> break-even sequence.
+    if (
+        is_scalping_management(management)
+        and not break_even_set
+        and current_progress_r + 1e-9 >= float(management.get("break_even_trigger_r") or 1.0)
+    ):
+        return {"action": "retry_break_even"}
 
     # Protection retries must run before advancing to the next profit stage.
     if tp1_done and not break_even_set:
         return {"action": "retry_break_even"}
-    if tp2_done and trailing_stop is None:
+    if tp2_done and trailing_enabled(management) and trailing_stop is None:
         return {"action": "retry_trailing"}
+    if tp2_done and is_scalping_management(management) and profit_lock_stop is None:
+        return {"action": "retry_profit_lock"}
 
     native_tp_active = bool(management.get("native_tp_enabled")) and not bool(management.get("native_tp_degraded"))
     if native_tp_active:
         # Exchange-native reduce-only orders own TP1/TP2. Mark-price polling must
         # never submit a duplicate partial market close while those orders are
         # live. The watcher persists fills as tp1_done/tp2_done.
-        if tp2_done:
+        if tp2_done and trailing_enabled(management):
             return {"action": "trail"}
         return {"action": "hold"}
 
@@ -59,8 +83,10 @@ def evaluate_management_action(trade: dict[str, Any], mark_price: float, now: da
         return {"action": "tp1"}
     if hit_tp2 and tp1_done and not tp2_done:
         return {"action": "tp2"}
-    if tp2_done:
+    if tp2_done and trailing_enabled(management):
         return {"action": "trail"}
+    if tp2_done and is_profiled_management(management):
+        return {"action": "hold"}
     return {"action": "hold"}
 
 
