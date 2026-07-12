@@ -6,11 +6,12 @@ Bybit-first automated trading terminal built with **FastAPI, React, PostgreSQL a
 
 The project is in **Demo Beta / Engineering Verification**. Live-capital trading is not approved.
 
-> **Last documentation update:** 13 July 2026, 1:01 AM BDT (`Asia/Dhaka`)  
+> **Last documentation update:** 13 July 2026, 1:04 AM BDT (`Asia/Dhaka`)  
 > **Latest `main` commit:** `a1510e5abb428dd955691861875d41801e7baee6` — PR #35 Signal Engine hotfix  
 > **Active branch:** `fix/intraday-protection-partial-pnl-sync`  
 > **Active pull request:** PR #36  
 > **Current task:** Intraday TP1 break-even, TP2 trailing and partial Journal/PnL repair  
+> **Automated code verification:** CI run #271 **PASS**, backend **194/194**, frontend checks **PASS**  
 > **Live trading:** blocked by default
 
 ---
@@ -202,9 +203,9 @@ A green CI run does not prove exchange/runtime behavior.
 |---:|---|---|
 | 0 | README structure and runtime-audit closure | **Complete** |
 | 1 | Scalping TP2 → TP1-price SL profit lock | Automated repair exists in PR #32; rebase/merge/deploy pending |
-| 2A | Intraday TP1 break-even and TP2 trailing retry | **Active — PR #36** |
-| 2B | Partial-fill Journal, fees and realized PnL | **Active — PR #36** |
-| 2C | Dashboard/Active Trades open-partial realized PnL | **Active — PR #36** |
+| 2A | Intraday TP1 break-even and TP2 trailing retry | **Automated PASS — PR #36 merge/deploy pending** |
+| 2B | Partial-fill Journal, fees and realized PnL | **Automated PASS — PR #36 merge/deploy pending** |
+| 2C | Dashboard/Active Trades open-partial realized PnL | **Automated PASS — PR #36 merge/deploy pending** |
 | 3 | Recover authoritative strategy/profile metadata | Pending |
 | 4 | Correct TP labels and Risk/daily-trade UI values | Pending |
 | 5 | Blank-page stability | Signal initial-render guard merged in PR #35; deployed browser verification pending |
@@ -250,7 +251,9 @@ Only one bounded repair package may be active at a time. PASS/FAIL evidence belo
 
 - **12:44 AM–12:45 AM BDT:** LABUSDT Bybit Demo, Journal, Active Trades and Dashboard screenshots captured.
 - **1:00 AM BDT:** Product Owner approved the bounded repair.
-- **1:01 AM BDT:** PR #36 opened; GitHub Actions CI run #269 started.
+- **1:01 AM BDT:** PR #36 opened.
+- **1:02 AM BDT:** CI run #271 completed successfully.
+- **1:04 AM BDT:** README synchronized with automated evidence.
 
 ### LABUSDT Intraday runtime evidence
 
@@ -274,45 +277,46 @@ Only one bounded repair package may be active at a time. PASS/FAIL evidence belo
 1. Native reconciliation persisted `tp1_done`/`tp2_done` even when protection amendment or verification failed; later fast cycles skipped the stage.
 2. Deployed partial reconciliation did not persist exact cumulative Bybit PnL, fees and weighted exit into visible Journal columns.
 3. Dashboard and Active Trades calculated realized PnL from fully closed trades only, excluding open positions with realized partial fills.
-4. Unknown profile handling was not strict enough for protection authority.
+4. Unknown or conflicting profile state must be blocked instead of receiving a silent management default.
 
-### PR #36 implementation checklist
+### PR #36 automated checklist
 
-| Check | Result |
-|---|---|
-| Bounded branch created | **PASS** |
-| Explicit-Intraday fast protection guard added | **PASS CODE** |
-| TP1 break-even retry separated from `tp1_done` | **PASS CODE** |
-| TP2 trailing retry separated from `tp2_done` | **PASS CODE** |
-| Restart quantity inference added | **PASS CODE** |
-| Unknown/conflicting profile blocked | **PASS CODE** |
-| Exact partial Journal/PnL/fees synchronization added | **PASS CODE** |
-| BDT daily realized metrics including open partials added | **PASS CODE** |
-| Dashboard and Active Trades consume daily realized authority | **PASS CODE** |
-| Focused tests added | **PASS — execution pending** |
-| Full backend suite | **PENDING — CI run #269** |
-| Frontend TypeScript check | **PENDING — CI run #269** |
-| Frontend production build | **PENDING — CI run #269** |
-| Product Owner merge approval | **PENDING** |
-| Render deployment | **PENDING** |
-| New Bybit Demo verification | **PENDING** |
+| Check | Result | Evidence |
+|---|---|---|
+| Bounded branch and PR | **PASS** | PR #36 |
+| Explicit-Intraday fast protection guard | **PASS** | Two-second monitor integration |
+| TP1 break-even retry after persisted `tp1_done` | **PASS** | Focused transient-failure test |
+| TP2 trailing retry after persisted `tp2_done` | **PASS** | Focused transient-failure test |
+| Restart quantity inference | **PASS** | Focused restart test |
+| Unknown/conflicting profile blocked | **PASS** | Focused authority test |
+| Exact partial Journal/PnL/fees synchronization | **PASS** | Six reconciliation tests |
+| BDT daily realized metrics including open partials | **PASS** | Three daily-accounting tests |
+| Dashboard and Active Trades use backend daily authority | **PASS BUILD** | TypeScript and production build passed |
+| Backend compile | **PASS** | CI run #271 |
+| Full backend suite | **PASS** | **194/194 tests passed** |
+| Frontend TypeScript check | **PASS** | CI run #271 |
+| Frontend production build | **PASS** | CI run #271 |
+| GitHub Actions CI | **PASS** | Run #271 |
+| Product Owner merge approval | **PENDING** | No merge performed |
+| Render deployment | **PENDING** | Requires merge |
+| New Bybit Demo verification | **PENDING** | Requires deployment and fresh lifecycle |
 
 ### Current gate-based progress
 
 | Work item | Completed gates | Progress | Current status |
 |---|---:|---:|---|
 | Signal white-screen hotfix | 4/5 | **80%** | Merged; browser verification pending |
-| Intraday BE/trailing repair | 4/7 | **57%** | Code/tests added; CI, merge and runtime pending |
-| Partial Journal/PnL repair | 4/7 | **57%** | Code/tests added; CI, merge and runtime pending |
-| Dashboard open-partial realized repair | 3/6 | **50%** | Code added; frontend CI, merge and runtime pending |
-| Complete Intraday deployed lifecycle | 3/10 | **30%** | Entry, TP1 and TP2 fills passed; protection/accounting failed |
+| Intraday BE/trailing repair | 6/8 | **75%** | Code and CI passed; merge/runtime pending |
+| Partial Journal/PnL repair | 6/8 | **75%** | Code and CI passed; merge/runtime pending |
+| Dashboard open-partial realized repair | 5/7 | **71%** | Code and frontend checks passed; merge/runtime pending |
+| Complete Intraday deployed lifecycle | 3/10 | **30%** | Entry, TP1 and TP2 fills passed; protection/accounting failed on deployed version |
 | Metadata recovery | 0/5 | **0%** | Not started |
 | Restart/cleanup/orphan-order verification | 0/6 | **0%** | Not started |
 
 ### Current verdict
 
-The exchange partial fills are confirmed, but the deployed lifecycle is **FAIL** because break-even, trailing and partial financial reconciliation did not complete. PR #36 is an automated repair candidate only; no deployment or runtime success is claimed yet.
+PR #36 implementation and automated verification are **PASS**. The deployed runtime remains **FAIL/PENDING** until the PR is approved, merged, deployed and verified with a fresh Bybit Demo lifecycle.
 
 ### Next task
 
-> Complete CI review for PR #36. After a separate Product Owner merge approval: deploy to Render and re-test `Entry → TP1 → Break-even → TP2 → trailing → Journal/fees/PnL → final close`.
+> Product Owner review and merge decision for PR #36. After merge: deploy to Render and re-test `Entry → TP1 → Break-even → TP2 → trailing → Journal/fees/PnL → final close`.
