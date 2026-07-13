@@ -1,4 +1,4 @@
-# DrayFrogd V2
+# DayForge V2
 
 > **DayForge — Forge Better Trading Every Day**
 
