@@ -8,18 +8,18 @@ Only one task may be active at a time. A task is active when its state is `CLAIM
 |---|---|---|---|---|---|
 | BACKTEST-STRATEGY-TRUTH-001 | Audit and prove live/backtest strategy equivalence | ChatGPT session 14 Jul 2026 | CLAIMED / AUDIT STARTING | `audit/backtest-strategy-truth` / Issue #59 | Product Owner set highest product-value priority; no code claim yet |
 
-## Paused governance task
+## Governance documentation
 
 | Task ID | Title | State | Branch / PR | Note |
 |---|---|---|---|---|
-| GOV-001 | Create chat-independent Project Control System | CODE PASS / OWNER ACCEPTED / MERGE PENDING | `docs/compact-readme-pending-2026-07-14` / PR #52 | Paused by explicit Product Owner priority change; main not merged |
+| GOV-001 | Create chat-independent Project Control System | CODE PASS / REVIEW PENDING | `docs/compact-readme-pending-2026-07-14` / PR #52 | Documentation remains open and unmerged; no Product Owner merge approval recorded |
 
 ## Engineering queue
 
 | Priority | Task ID | Title | State | Dependency |
 |---:|---|---|---|---|
 | PRODUCT-1 | BACKTEST-STRATEGY-TRUTH-001 | Prove and repair strategy/backtest truth | CLAIMED | Issue #59 |
-| SAFETY-1 | DAILY-LOSS-AUTHORITY-001 | Authoritative Bybit 5% BDT-day loss circuit | AVAILABLE / AUTO EXECUTION BLOCKER | Required before Demo auto execution resumes |
+| SAFETY-1 | DAILY-LOSS-AUTHORITY-001 | Authoritative Bybit 5% BDT-day loss circuit | AVAILABLE / SAFETY DEFECT | Runtime start/stop remains Product Owner-controlled |
 | SAFETY-2 | JOURNAL-IDENTITY-001 | Persist/backfill `orderId`, `orderLinkId`, `execId` and fills | AVAILABLE | Required for live accounting/lifecycle verification |
 | P0-3 | PNL-MATCH-001 | Exact overlapping-trade PnL attribution | CODE PASS / PR #48 NOT MERGED | Product Owner merge decision |
 | P0-4 | STATE-CLASS-001 | Active/pending/stale/closed separation | CODE PASS / PR #49 NOT MERGED | Product Owner merge decision |
@@ -33,7 +33,7 @@ Only one task may be active at a time. A task is active when its state is `CLAIM
 
 ## Priority rule
 
-Backtest is the next product-development task because strategy validity determines whether the application has trading value. This priority does **not** authorize Demo auto execution. Runtime safety blockers remain mandatory before automated execution resumes.
+Backtest is the next product-development task because strategy validity determines whether the application has trading value. This priority does not authorize any runtime state change. Starting, stopping, pausing or resuming the bot requires explicit Product Owner approval.
 
 ## Claim procedure
 
