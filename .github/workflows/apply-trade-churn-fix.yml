@@ -53,7 +53,17 @@ jobs:
         run: python -m unittest tests.test_trade_churn_guards tests.test_execution_reservation -v
 
       - name: Full backend tests
-        run: python -m unittest discover -s tests -p 'test_*.py' -v
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tee churn-full-tests.log
+
+      - name: Upload regression log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trade-churn-full-tests
+          path: churn-full-tests.log
 
       - name: Commit verified implementation
         run: |
