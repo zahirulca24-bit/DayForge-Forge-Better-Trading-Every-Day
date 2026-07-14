@@ -9,6 +9,8 @@ Every project claim must use an evidence level. New evidence supersedes older ev
 - `CI CONFIRMED`
 - `RUNTIME SCREENSHOT CONFIRMED`
 - `RUNTIME LOG CONFIRMED`
+- `OWNER DECISION CONFIRMED`
+- `OWNER CORRECTION CONFIRMED`
 - `SUSPECTED`
 - `NOT TESTED`
 - `CONTRADICTED`
@@ -38,6 +40,7 @@ Every project claim must use an evidence level. New evidence supersedes older ev
 | EVD-018 | A Strategy Backtest Engine UI is deployed with symbol, strategy, candle-count, risk, fee and RR controls | RUNTIME SCREENSHOT CONFIRMED | Settings screenshot, 14 Jul 2026 | Proves UI/endpoint availability only |
 | EVD-019 | Backtest/live strategy equivalence, no-look-ahead correctness and deterministic simulation | NOT TESTED | Issue #59 opened | Strategy validity cannot currently be claimed |
 | EVD-020 | Product Owner made backtest and strategy validity the highest product-value priority | OWNER DECISION CONFIRMED | DEC-016, 14 Jul 2026 | Settings consolidation is deferred until after backtest audit |
+| EVD-021 | Product Owner did not authorize the AI to stop, pause, start or resume Demo auto execution | OWNER CORRECTION CONFIRMED | Direct correction, 14 Jul 2026 | AI-created DEC-017 is invalid; runtime state remains Product Owner-controlled |
 
 ## Prohibited conclusions
 
@@ -51,6 +54,7 @@ The current evidence does **not** prove:
 - that a connected badge proves full lifecycle correctness;
 - that a passing CI suite proves Render runtime correctness;
 - that account-level ledger rows can be safely assigned to a Journal trade without exact identity;
+- that a safety finding authorizes an AI session to change runtime state;
 - that live-capital trading is safe.
 
 ## Adding evidence
