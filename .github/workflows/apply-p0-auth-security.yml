@@ -4,16 +4,13 @@ on:
   push:
     branches:
       - fix/p0-auth-security
-  pull_request:
-    branches:
-      - main
 
 permissions:
   contents: write
 
 jobs:
   apply-and-verify:
-    if: ${{ !contains(github.event.head_commit.message || '', '[p0-auth-applied]') }}
+    if: ${{ !contains(github.event.head_commit.message || '', '[p0-auth-applied]') && !contains(github.event.head_commit.message || '', '[p0-auth-diagnostic]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,15 +25,30 @@ jobs:
       - name: Install backend dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Apply authentication patches
+      - name: Apply authentication patches with diagnostics
+        shell: bash
         run: |
-          git apply .p0/auth.patch
-          git apply .p0/config.patch
-          git apply .p0/main.patch
-          git apply .p0/schemas.patch
-          git apply .p0/auth_tests.patch
-          git apply .p0/frontend_app.patch
-          git apply .p0/frontend_api.patch
+          set +e
+          : > .p0/apply-error.txt
+          failed=0
+          for name in auth config main schemas auth_tests frontend_app frontend_api; do
+            echo "=== ${name}.patch ===" >> .p0/apply-error.txt
+            git apply --check --verbose ".p0/${name}.patch" >> .p0/apply-error.txt 2>&1
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+              failed=1
+              break
+            fi
+            git apply ".p0/${name}.patch"
+          done
+          if [ "$failed" -ne 0 ]; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add .p0/apply-error.txt
+            git commit -m 'chore: capture auth patch failure [p0-auth-diagnostic]'
+            git push origin HEAD:fix/p0-auth-security
+            exit 1
+          fi
 
       - name: Run focused auth tests
         run: python -m unittest tests.test_auth_security
