@@ -22,6 +22,19 @@ jobs:
           ref: fix/trade-churn-guards
           fetch-depth: 0
 
+      - name: Normalize backward-compatible defaults
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tools/apply_trade_churn_fix.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              "    '    daily_limit = int(max_daily_trades or 0)\\n'\n    '    cooldown_minutes = int(reentry_cooldown_minutes or 0)\\n'",
+              "    '    daily_limit = int(max_daily_trades if max_daily_trades is not None else 8)\\n'\n    '    cooldown_minutes = int(reentry_cooldown_minutes if reentry_cooldown_minutes is not None else 30)\\n'",
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+
       - name: Apply deterministic source transform
         run: python tools/apply_trade_churn_fix.py
 
