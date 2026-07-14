@@ -74,5 +74,4 @@ jobs:
           git rm tools/apply_trade_churn_fix.py
           git add app tests
           git commit -m 'Add trade churn and repeat-entry guards'
-          git pull --rebase origin fix/trade-churn-guards
           git push origin HEAD:fix/trade-churn-guards
