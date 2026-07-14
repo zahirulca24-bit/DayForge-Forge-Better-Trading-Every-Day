@@ -42,7 +42,13 @@ jobs:
         run: python -m unittest tests.test_scalping_timeout_suppression -v
 
       - name: Run full backend suite
-        run: python -m unittest discover -s tests -p 'test_*.py' -v
+        shell: bash
+        run: |
+          set +e
+          python -m unittest discover -s tests -p 'test_*.py' > full-backend.log 2>&1
+          status=$?
+          cat full-backend.log
+          exit $status
 
       - name: Set up Node
         uses: actions/setup-node@v4
