@@ -22,6 +22,8 @@ from app.scanner_trend import MIN_TREND_CANDLES
 
 
 class ScannerProfileContractTests(unittest.TestCase):
+    """Protect canonical profile wiring and production-safe scanner limits."""
+
     def test_scanner_intervals_derive_from_canonical_profiles(self) -> None:
         self.assertEqual(INTRADAY_TREND_INTERVAL, INTRADAY_PROFILE.trend_interval)
         self.assertEqual(INTRADAY_SETUP_INTERVAL, INTRADAY_PROFILE.setup_interval)
