@@ -18,6 +18,27 @@ jobs:
           ref: fix/control-page-watchdog-contract
           fetch-depth: 0
 
+      - name: Apply compatibility patch
+        run: python _ci_apply_watchdog_compat.py
+
+      - name: Preflight source contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          main_source = Path('app/main.py').read_text(encoding='utf-8')
+          api_source = Path('frontend/src/api.ts').read_text(encoding='utf-8')
+          checks = {
+              'status_route': '@app.get("/watchdog/status")' in main_source,
+              'operational_return': 'return get_watchdog_snapshot(worker_running=worker_running)' in main_source,
+              'runtime_route': '@app.get("/watchdog/runtime-status")' in main_source,
+              'runtime_return': 'return get_watchdog_runtime_status()' in main_source,
+              'operations_route': '@app.get("/watchdog/operations")' in main_source,
+              'frontend_status_path': 'getWatchdogStatus: (token: string) => request<WatchdogSnapshot>("/watchdog/status"' in api_source,
+          }
+          print(checks)
+          assert all(checks.values()), checks
+          PY
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -25,9 +46,6 @@ jobs:
 
       - name: Install backend dependencies
         run: pip install -r requirements.txt
-
-      - name: Apply compatibility patch
-        run: python _ci_apply_watchdog_compat.py
 
       - name: Compile backend
         run: python -m compileall app
