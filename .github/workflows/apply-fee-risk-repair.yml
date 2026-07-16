@@ -1,0 +1,668 @@
+name: Apply fee-inclusive risk repair
+
+on:
+  push:
+    branches:
+      - fix/fee-inclusive-risk-sizing
+    paths:
+      - .github/workflows/apply-fee-risk-repair.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/fee-inclusive-risk-sizing
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Apply bounded fee-risk repair
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text(encoding="utf-8")
+              if old not in text:
+                  raise SystemExit(f"Expected block not found in {path}")
+              target.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          env_path = Path(".env.example")
+          env_text = env_path.read_text(encoding="utf-8").rstrip() + "\n"
+          if "EXECUTION_TAKER_FEE_BPS=" not in env_text:
+              env_text += "\nEXECUTION_TAKER_FEE_BPS=5.5\nEXECUTION_SLIPPAGE_BPS=0.0\n"
+          env_path.write_text(env_text, encoding="utf-8")
+
+          replace_once(
+              "app/config.py",
+              '    bot_scan_interval_seconds: int = int(os.getenv("BOT_SCAN_INTERVAL_SECONDS", "30"))\n',
+              '    bot_scan_interval_seconds: int = int(os.getenv("BOT_SCAN_INTERVAL_SECONDS", "30"))\n'
+              '    execution_taker_fee_bps: float = float(os.getenv("EXECUTION_TAKER_FEE_BPS", "5.5"))\n'
+              '    execution_slippage_bps: float = float(os.getenv("EXECUTION_SLIPPAGE_BPS", "0.0"))\n',
+          )
+
+          Path("app/trading_costs.py").write_text(
+              '''from __future__ import annotations
+
+from math import isfinite
+
+DEFAULT_TAKER_FEE_BPS = 5.5
+DEFAULT_SLIPPAGE_BPS = 0.0
+
+
+def calculate_cost_adjusted_geometry(
+    *,
+    direction: str,
+    entry: float,
+    stop_loss: float,
+    take_profit: float,
+    quantity: float = 1.0,
+    fee_bps: float = DEFAULT_TAKER_FEE_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
+    observed_entry_fee: float | None = None,
+) -> dict[str, float] | None:
+    """Return gross and fee/slippage-adjusted risk/reward economics."""
+
+    try:
+        entry_value = float(entry)
+        stop_value = float(stop_loss)
+        target_value = float(take_profit)
+        qty = float(quantity)
+        fee_rate = max(float(fee_bps), 0.0) / 10_000.0
+        slippage_rate = max(float(slippage_bps), 0.0) / 10_000.0
+    except (TypeError, ValueError):
+        return None
+
+    if not all(isfinite(value) and value > 0 for value in (entry_value, stop_value, target_value, qty)):
+        return None
+
+    normalized_direction = str(direction or "").lower().strip()
+    if normalized_direction == "long":
+        if not stop_value < entry_value < target_value:
+            return None
+        gross_risk_per_unit = entry_value - stop_value
+        gross_reward_per_unit = target_value - entry_value
+    elif normalized_direction == "short":
+        if not target_value < entry_value < stop_value:
+            return None
+        gross_risk_per_unit = stop_value - entry_value
+        gross_reward_per_unit = entry_value - target_value
+    else:
+        return None
+
+    estimated_entry_fee = entry_value * qty * fee_rate
+    if observed_entry_fee is not None:
+        try:
+            candidate = abs(float(observed_entry_fee))
+        except (TypeError, ValueError):
+            candidate = estimated_entry_fee
+        if isfinite(candidate):
+            estimated_entry_fee = candidate
+
+    stop_exit_fee = stop_value * qty * fee_rate
+    target_exit_fee = target_value * qty * fee_rate
+    entry_slippage = entry_value * qty * slippage_rate
+    stop_exit_slippage = stop_value * qty * slippage_rate
+    target_exit_slippage = target_value * qty * slippage_rate
+
+    gross_risk = gross_risk_per_unit * qty
+    gross_reward = gross_reward_per_unit * qty
+    estimated_stop_costs = estimated_entry_fee + stop_exit_fee + entry_slippage + stop_exit_slippage
+    estimated_target_costs = estimated_entry_fee + target_exit_fee + entry_slippage + target_exit_slippage
+    net_risk = gross_risk + estimated_stop_costs
+    net_reward = gross_reward - estimated_target_costs
+    gross_rr = gross_reward / gross_risk if gross_risk > 0 else 0.0
+    net_rr = net_reward / net_risk if net_risk > 0 and net_reward > 0 else 0.0
+
+    return {
+        "quantity": qty,
+        "fee_bps": fee_rate * 10_000.0,
+        "slippage_bps": slippage_rate * 10_000.0,
+        "gross_risk_per_unit": gross_risk_per_unit,
+        "gross_reward_per_unit": gross_reward_per_unit,
+        "gross_risk": gross_risk,
+        "gross_reward": gross_reward,
+        "gross_risk_reward": gross_rr,
+        "estimated_entry_fee": estimated_entry_fee,
+        "estimated_stop_exit_fee": stop_exit_fee,
+        "estimated_target_exit_fee": target_exit_fee,
+        "estimated_entry_slippage": entry_slippage,
+        "estimated_stop_exit_slippage": stop_exit_slippage,
+        "estimated_target_exit_slippage": target_exit_slippage,
+        "estimated_stop_costs": estimated_stop_costs,
+        "estimated_target_costs": estimated_target_costs,
+        "net_risk": net_risk,
+        "net_reward": net_reward,
+        "net_risk_reward": net_rr,
+    }
+''',
+              encoding="utf-8",
+          )
+
+          replace_once(
+              "app/position_sizing.py",
+              'from app.exchange import BybitClient\n',
+              'from app.exchange import BybitClient\n'
+              'from app.trading_costs import (\n'
+              '    DEFAULT_SLIPPAGE_BPS,\n'
+              '    DEFAULT_TAKER_FEE_BPS,\n'
+              '    calculate_cost_adjusted_geometry,\n'
+              ')\n',
+          )
+          replace_once("app/position_sizing.py", 'DEFAULT_FEE_BPS_PER_SIDE = 5.5\n', '')
+          replace_once(
+              "app/position_sizing.py",
+              '''    fee_bps_per_side = _non_negative_float(settings.get("fee_bps_per_side"))
+    if fee_bps_per_side is None:
+        fee_bps_per_side = DEFAULT_FEE_BPS_PER_SIDE
+    fee_rate = fee_bps_per_side / 10_000
+    estimated_fee_per_unit = (entry + stop_loss) * fee_rate
+    risk_per_unit_with_fees = sl_distance + estimated_fee_per_unit
+    if risk_per_unit_with_fees <= 0 or not isfinite(risk_per_unit_with_fees):
+        return _reject("Position risk including fees is invalid")
+
+    raw_quantity = target_risk_amount / risk_per_unit_with_fees
+''',
+              '''    fee_bps = _non_negative_float(settings.get("fee_bps"))
+    if fee_bps is None:
+        fee_bps = _non_negative_float(settings.get("fee_bps_per_side"))
+    if fee_bps is None:
+        fee_bps = DEFAULT_TAKER_FEE_BPS
+    slippage_bps = _non_negative_float(settings.get("slippage_bps"))
+    if slippage_bps is None:
+        slippage_bps = DEFAULT_SLIPPAGE_BPS
+    min_net_risk_reward = _non_negative_float(settings.get("min_risk_reward")) or 0.0
+
+    unit_economics = calculate_cost_adjusted_geometry(
+        direction=normalized["direction"],
+        entry=entry,
+        stop_loss=stop_loss,
+        take_profit=normalized["take_profit"],
+        quantity=1.0,
+        fee_bps=fee_bps,
+        slippage_bps=slippage_bps,
+    )
+    if unit_economics is None:
+        return _reject("Invalid entry/SL/TP geometry")
+    if unit_economics["net_reward"] <= 0:
+        return _reject("Estimated fees and slippage eliminate the trade reward")
+    if unit_economics["net_risk_reward"] + 1e-9 < min_net_risk_reward:
+        return _reject(
+            f"Net risk reward {unit_economics['net_risk_reward']:.4f} is below "
+            f"minimum {min_net_risk_reward:.4f} after fees and slippage"
+        )
+
+    risk_per_unit_with_fees = unit_economics["net_risk"]
+    raw_quantity = target_risk_amount / risk_per_unit_with_fees
+''',
+          )
+          replace_once(
+              "app/position_sizing.py",
+              '''    price_risk_amount = quantity * sl_distance
+    estimated_open_fee = quantity * entry * fee_rate
+    estimated_stop_fee = quantity * stop_loss * fee_rate
+    estimated_round_trip_fees = estimated_open_fee + estimated_stop_fee
+    actual_risk_amount = price_risk_amount + estimated_round_trip_fees
+    if price_risk_amount <= 0 or actual_risk_amount <= 0 or not isfinite(actual_risk_amount):
+        return _reject("Position risk is invalid")
+    if actual_risk_amount > target_risk_amount * 1.001:
+        return _reject("Minimum quantity exceeds configured fixed USDT risk after fees")
+''',
+              '''    economics = calculate_cost_adjusted_geometry(
+        direction=normalized["direction"],
+        entry=entry,
+        stop_loss=stop_loss,
+        take_profit=normalized["take_profit"],
+        quantity=quantity,
+        fee_bps=fee_bps,
+        slippage_bps=slippage_bps,
+    )
+    if economics is None:
+        return _reject("Position economics are invalid")
+
+    price_risk_amount = economics["gross_risk"]
+    estimated_open_fee = economics["estimated_entry_fee"]
+    estimated_stop_fee = economics["estimated_stop_exit_fee"]
+    estimated_round_trip_fees = estimated_open_fee + estimated_stop_fee
+    actual_risk_amount = economics["net_risk"]
+    if price_risk_amount <= 0 or actual_risk_amount <= 0 or not isfinite(actual_risk_amount):
+        return _reject("Position risk is invalid")
+    if actual_risk_amount > target_risk_amount * 1.001:
+        return _reject("Minimum quantity exceeds configured fee-inclusive USDT risk")
+    if economics["net_risk_reward"] + 1e-9 < min_net_risk_reward:
+        return _reject(
+            f"Net risk reward {economics['net_risk_reward']:.4f} is below "
+            f"minimum {min_net_risk_reward:.4f} after quantity normalization"
+        )
+''',
+          )
+          replace_once(
+              "app/position_sizing.py",
+              '''        "price_risk_amount": price_risk_amount,
+        "estimated_open_fee": estimated_open_fee,
+        "estimated_stop_fee": estimated_stop_fee,
+        "estimated_round_trip_fees": estimated_round_trip_fees,
+        "fee_bps_per_side": fee_bps_per_side,
+        "risk_per_unit_with_fees": risk_per_unit_with_fees,
+        "target_risk_amount": target_risk_amount,
+''',
+              '''        "price_risk_amount": price_risk_amount,
+        "gross_price_risk_amount": price_risk_amount,
+        "fee_inclusive_risk_amount": actual_risk_amount,
+        "estimated_open_fee": estimated_open_fee,
+        "estimated_entry_fee": estimated_open_fee,
+        "estimated_stop_fee": estimated_stop_fee,
+        "estimated_stop_exit_fee": estimated_stop_fee,
+        "estimated_round_trip_fees": estimated_round_trip_fees,
+        "estimated_stop_costs": economics["estimated_stop_costs"],
+        "estimated_net_reward": economics["net_reward"],
+        "gross_risk_reward": economics["gross_risk_reward"],
+        "net_risk_reward": economics["net_risk_reward"],
+        "fee_bps_per_side": fee_bps,
+        "fee_bps": fee_bps,
+        "slippage_bps": slippage_bps,
+        "min_net_risk_reward": min_net_risk_reward,
+        "risk_per_unit_with_fees": risk_per_unit_with_fees,
+        "target_risk_amount": target_risk_amount,
+''',
+          )
+
+          replace_once(
+              "app/execution_service.py",
+              'from app.bot_controls import can_execute, get_execution_mode\n',
+              'from app.bot_controls import can_execute, get_execution_mode\nfrom app.config import settings as app_settings\n',
+          )
+          replace_once(
+              "app/execution_service.py",
+              'from app.trade_management_profiles import build_profile_management_state, extract_observed_entry_fee\n',
+              'from app.trade_management_profiles import build_profile_management_state, extract_observed_entry_fee\n'
+              'from app.trading_costs import calculate_cost_adjusted_geometry\n',
+          )
+          replace_once(
+              "app/execution_service.py",
+              '''            "risk_amount": validation.get("risk_amount"),
+            "leverage_cap": validation.get("leverage_cap"),
+            "exposure_cap": validation.get("exposure_cap"),
+''',
+              '''            "risk_amount": validation.get("risk_amount"),
+            "leverage_cap": validation.get("leverage_cap"),
+            "exposure_cap": validation.get("exposure_cap"),
+            "min_risk_reward": validation.get("min_risk_reward"),
+            "fee_bps": app_settings.execution_taker_fee_bps,
+            "slippage_bps": app_settings.execution_slippage_bps,
+''',
+          )
+          replace_once(
+              "app/execution_service.py",
+              '''    actual_entry = float(fill["avg_price"])
+    actual_quantity = float(fill["quantity"])
+    actual_check = _validate_actual_fill(
+        direction=execution_signal["direction"],
+        entry=actual_entry,
+        stop_loss=float(stop_loss),
+        take_profit=float(execution_signal["take_profit"]),
+        quantity=actual_quantity,
+        validation=validation,
+    )
+
+    provisional_trade_for_fee = {
+        "exchange_metadata": {
+            "fill_confirmation": fill,
+        },
+    }
+    management = build_profile_management_state(
+        entry=actual_entry,
+        stop_loss=float(stop_loss),
+        take_profit=float(execution_signal["take_profit"]),
+        quantity=actual_quantity,
+        direction=execution_signal["direction"],
+        trade_type=validation.get("trade_type"),
+        observed_entry_fee=extract_observed_entry_fee(provisional_trade_for_fee),
+    )
+''',
+              '''    actual_entry = float(fill["avg_price"])
+    actual_quantity = float(fill["quantity"])
+    provisional_trade_for_fee = {
+        "exchange_metadata": {
+            "fill_confirmation": fill,
+        },
+    }
+    observed_entry_fee = extract_observed_entry_fee(provisional_trade_for_fee)
+    actual_check = _validate_actual_fill(
+        direction=execution_signal["direction"],
+        entry=actual_entry,
+        stop_loss=float(stop_loss),
+        take_profit=float(execution_signal["take_profit"]),
+        quantity=actual_quantity,
+        validation=validation,
+        fee_bps=float(sizing.get("fee_bps") or 0.0),
+        slippage_bps=float(sizing.get("slippage_bps") or 0.0),
+        observed_entry_fee=observed_entry_fee if observed_entry_fee > 0 else None,
+    )
+
+    management = build_profile_management_state(
+        entry=actual_entry,
+        stop_loss=float(stop_loss),
+        take_profit=float(execution_signal["take_profit"]),
+        quantity=actual_quantity,
+        direction=execution_signal["direction"],
+        trade_type=validation.get("trade_type"),
+        observed_entry_fee=float(actual_check.get("estimated_entry_fee") or observed_entry_fee or 0.0),
+    )
+''',
+          )
+          replace_once(
+              "app/execution_service.py",
+              '''def _validate_actual_fill(
+    *,
+    direction: str,
+    entry: float,
+    stop_loss: float,
+    take_profit: float,
+    quantity: float,
+    validation: dict[str, Any],
+) -> dict[str, Any]:
+    geometry = calculate_authoritative_risk_reward(
+        direction=direction,
+        entry=entry,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+    )
+    if geometry is None:
+        return {"allowed": False, "reason": "Actual fill invalidated entry/SL/TP geometry"}
+
+    min_rr = float(validation.get("min_risk_reward") or 0.0)
+    if geometry["risk_reward"] + 1e-9 < min_rr:
+        return {
+            "allowed": False,
+            "reason": f"Actual fill reduced RR below {min_rr:.1f}",
+            "actual_risk_reward": geometry["risk_reward"],
+        }
+
+    actual_risk = geometry["risk_distance"] * quantity
+    target_risk = float(validation.get("risk_amount") or 0.0)
+    if actual_risk > target_risk * RISK_AMOUNT_TOLERANCE + 1e-9:
+        return {
+            "allowed": False,
+            "reason": f"Actual fill risk {actual_risk:.8f} exceeds target {target_risk:.8f}",
+            "actual_risk": actual_risk,
+            "target_risk": target_risk,
+            "actual_risk_reward": geometry["risk_reward"],
+        }
+    return {
+        "allowed": True,
+        "reason": "",
+        "actual_risk": actual_risk,
+        "target_risk": target_risk,
+        "actual_risk_reward": geometry["risk_reward"],
+    }
+''',
+              '''def _validate_actual_fill(
+    *,
+    direction: str,
+    entry: float,
+    stop_loss: float,
+    take_profit: float,
+    quantity: float,
+    validation: dict[str, Any],
+    fee_bps: float = 0.0,
+    slippage_bps: float = 0.0,
+    observed_entry_fee: float | None = None,
+) -> dict[str, Any]:
+    geometry = calculate_authoritative_risk_reward(
+        direction=direction,
+        entry=entry,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+    )
+    economics = calculate_cost_adjusted_geometry(
+        direction=direction,
+        entry=entry,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        quantity=quantity,
+        fee_bps=fee_bps,
+        slippage_bps=slippage_bps,
+        observed_entry_fee=observed_entry_fee,
+    )
+    if geometry is None or economics is None:
+        return {"allowed": False, "reason": "Actual fill invalidated entry/SL/TP geometry"}
+
+    min_rr = float(validation.get("min_risk_reward") or 0.0)
+    if economics["net_risk_reward"] + 1e-9 < min_rr:
+        return {
+            "allowed": False,
+            "reason": (
+                f"Actual fill net RR {economics['net_risk_reward']:.4f} is below "
+                f"minimum {min_rr:.4f} after fees and slippage"
+            ),
+            "actual_risk_reward": geometry["risk_reward"],
+            "actual_net_risk_reward": economics["net_risk_reward"],
+            "actual_risk": economics["net_risk"],
+            "gross_price_risk": economics["gross_risk"],
+            "target_risk": float(validation.get("risk_amount") or 0.0),
+            "estimated_entry_fee": economics["estimated_entry_fee"],
+            "estimated_stop_exit_fee": economics["estimated_stop_exit_fee"],
+        }
+
+    actual_risk = economics["net_risk"]
+    target_risk = float(validation.get("risk_amount") or 0.0)
+    if actual_risk > target_risk * RISK_AMOUNT_TOLERANCE + 1e-9:
+        return {
+            "allowed": False,
+            "reason": f"Actual fill fee-inclusive risk {actual_risk:.8f} exceeds target {target_risk:.8f}",
+            "actual_risk": actual_risk,
+            "gross_price_risk": economics["gross_risk"],
+            "target_risk": target_risk,
+            "actual_risk_reward": geometry["risk_reward"],
+            "actual_net_risk_reward": economics["net_risk_reward"],
+            "estimated_entry_fee": economics["estimated_entry_fee"],
+            "estimated_stop_exit_fee": economics["estimated_stop_exit_fee"],
+        }
+    return {
+        "allowed": True,
+        "reason": "",
+        "actual_risk": actual_risk,
+        "gross_price_risk": economics["gross_risk"],
+        "target_risk": target_risk,
+        "actual_risk_reward": geometry["risk_reward"],
+        "actual_net_risk_reward": economics["net_risk_reward"],
+        "estimated_entry_fee": economics["estimated_entry_fee"],
+        "estimated_stop_exit_fee": economics["estimated_stop_exit_fee"],
+        "estimated_stop_costs": economics["estimated_stop_costs"],
+        "estimated_net_reward": economics["net_reward"],
+        "fee_bps": economics["fee_bps"],
+        "slippage_bps": economics["slippage_bps"],
+    }
+''',
+          )
+
+          Path("tests/test_fee_inclusive_risk.py").write_text(
+              '''import unittest
+from datetime import UTC, datetime
+
+from app.execution_service import _validate_actual_fill
+from app.position_sizing import calculate_position_size
+from app.trading_costs import calculate_cost_adjusted_geometry
+
+
+class FakeClient:
+    def normalize_quantity(self, value: float, qty_step: str) -> str:
+        step = float(qty_step)
+        normalized = int(value / step) * step
+        return f"{normalized:.8f}".rstrip("0").rstrip(".")
+
+
+class FeeInclusiveRiskTests(unittest.TestCase):
+    def test_geometry_adds_entry_and_stop_costs_to_risk(self) -> None:
+        result = calculate_cost_adjusted_geometry(
+            direction="long",
+            entry=100.0,
+            stop_loss=98.0,
+            take_profit=104.0,
+            quantity=10.0,
+            fee_bps=5.5,
+            slippage_bps=0.0,
+        )
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertAlmostEqual(result["gross_risk"], 20.0, places=8)
+        self.assertGreater(result["net_risk"], result["gross_risk"])
+        self.assertLess(result["net_risk_reward"], result["gross_risk_reward"])
+
+    def test_position_size_keeps_fees_inside_fixed_risk_budget(self) -> None:
+        result = calculate_position_size(
+            signal={
+                "symbol": "DOGEUSDT",
+                "direction": "long",
+                "entry": 0.0732,
+                "stop_loss": 0.0728,
+                "take_profit": 0.0744,
+                "detected_at": datetime.now(UTC).isoformat(),
+            },
+            wallet={"totalEquity": "1000", "totalAvailableBalance": "1000"},
+            symbol_info={
+                "qtyStep": "1",
+                "tickSize": "0.0001",
+                "minOrderQty": "1",
+                "minNotionalValue": "5",
+            },
+            active_trades=[],
+            positions=[],
+            settings={
+                "risk_amount": 20.0,
+                "leverage_cap": 20.0,
+                "exposure_cap": 0.50,
+                "fee_bps": 5.5,
+                "slippage_bps": 0.0,
+                "min_risk_reward": 1.5,
+            },
+            client=FakeClient(),
+        )
+
+        self.assertTrue(result["allowed"])
+        self.assertLess(result["gross_price_risk_amount"], 20.0)
+        self.assertGreater(result["estimated_stop_costs"], 0.0)
+        self.assertLessEqual(result["fee_inclusive_risk_amount"], 20.0 * 1.001)
+        self.assertGreaterEqual(result["net_risk_reward"], 1.5)
+
+    def test_position_size_rejects_gross_rr_that_fails_after_costs(self) -> None:
+        result = calculate_position_size(
+            signal={
+                "symbol": "DOGEUSDT",
+                "direction": "long",
+                "entry": 0.0732,
+                "stop_loss": 0.0728,
+                "take_profit": 0.0738,
+                "detected_at": datetime.now(UTC).isoformat(),
+            },
+            wallet={"totalEquity": "1000", "totalAvailableBalance": "1000"},
+            symbol_info={
+                "qtyStep": "1",
+                "tickSize": "0.0001",
+                "minOrderQty": "1",
+                "minNotionalValue": "5",
+            },
+            active_trades=[],
+            positions=[],
+            settings={
+                "risk_amount": 20.0,
+                "leverage_cap": 20.0,
+                "exposure_cap": 0.50,
+                "fee_bps": 5.5,
+                "slippage_bps": 0.0,
+                "min_risk_reward": 1.5,
+            },
+            client=FakeClient(),
+        )
+
+        self.assertFalse(result["allowed"])
+        self.assertIn("Net risk reward", result["reason"])
+
+    def test_actual_fill_counts_costs_inside_fixed_risk_budget(self) -> None:
+        result = _validate_actual_fill(
+            direction="long",
+            entry=100.0,
+            stop_loss=98.0,
+            take_profit=104.0,
+            quantity=10.0,
+            validation={"risk_amount": 20.0, "min_risk_reward": 1.5},
+            fee_bps=5.5,
+            slippage_bps=0.0,
+        )
+
+        self.assertFalse(result["allowed"])
+        self.assertAlmostEqual(result["gross_price_risk"], 20.0, places=8)
+        self.assertGreater(result["actual_risk"], 20.0)
+        self.assertIn("fee-inclusive risk", result["reason"])
+
+    def test_actual_fill_rejects_when_fees_break_net_rr(self) -> None:
+        result = _validate_actual_fill(
+            direction="long",
+            entry=0.0732,
+            stop_loss=0.0728,
+            take_profit=0.0738,
+            quantity=1000.0,
+            validation={"risk_amount": 1000.0, "min_risk_reward": 1.5},
+            fee_bps=5.5,
+            slippage_bps=0.0,
+        )
+
+        self.assertFalse(result["allowed"])
+        self.assertGreaterEqual(result["actual_risk_reward"], 1.49)
+        self.assertLess(result["actual_net_risk_reward"], 1.5)
+        self.assertIn("net RR", result["reason"])
+
+
+if __name__ == "__main__":
+    unittest.main()
+''',
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Install backend dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+
+      - name: Focused fee-risk verification
+        run: python -m unittest tests.test_fee_inclusive_risk
+
+      - name: Full backend verification
+        run: |
+          python -m compileall -q app tests
+          python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Frontend verification
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+
+      - name: Commit repaired implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .env.example app/config.py app/execution_service.py app/position_sizing.py app/trading_costs.py tests/test_fee_inclusive_risk.py
+          git commit -m "Rebuild fee-inclusive execution risk on latest main"
+          git push origin HEAD:fix/fee-inclusive-risk-sizing
