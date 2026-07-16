@@ -62,7 +62,17 @@ jobs:
 
       - name: Run full backend tests
         if: steps.guard.outputs.apply == 'true'
-        run: python -m unittest discover -s tests -p "test_*.py" -v
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -p "test_*.py" -v 2>&1 | tee full-backend-test.log
+
+      - name: Upload full backend diagnostics
+        if: always() && steps.guard.outputs.apply == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-5-full-backend-test-log
+          path: full-backend-test.log
 
       - name: Verify frontend
         if: steps.guard.outputs.apply == 'true'
