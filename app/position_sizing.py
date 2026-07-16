@@ -4,12 +4,10 @@ from datetime import UTC, datetime, timedelta
 from math import isfinite
 from typing import Any
 
+from app.config import settings as app_settings
+from app.engines.profiles import get_engine_profile
 from app.exchange import BybitClient
-from app.trading_costs import (
-    DEFAULT_SLIPPAGE_BPS,
-    DEFAULT_TAKER_FEE_BPS,
-    calculate_cost_adjusted_geometry,
-)
+from app.trading_costs import calculate_cost_adjusted_geometry
 
 
 SIGNAL_MAX_AGE_MINUTES = 10
@@ -79,11 +77,20 @@ def calculate_position_size(
     if fee_bps is None:
         fee_bps = _non_negative_float(settings.get("fee_bps_per_side"))
     if fee_bps is None:
-        fee_bps = DEFAULT_TAKER_FEE_BPS
+        fee_bps = max(float(app_settings.execution_taker_fee_bps), 0.0)
+
     slippage_bps = _non_negative_float(settings.get("slippage_bps"))
     if slippage_bps is None:
-        slippage_bps = DEFAULT_SLIPPAGE_BPS
-    min_net_risk_reward = _non_negative_float(settings.get("min_risk_reward")) or 0.0
+        slippage_bps = max(float(app_settings.execution_slippage_bps), 0.0)
+
+    min_net_risk_reward = _non_negative_float(settings.get("min_risk_reward"))
+    if min_net_risk_reward is None:
+        min_net_risk_reward = _non_negative_float(signal.get("engine_min_risk_reward"))
+    if min_net_risk_reward is None:
+        try:
+            min_net_risk_reward = get_engine_profile(signal.get("trade_type")).min_risk_reward
+        except ValueError:
+            min_net_risk_reward = 0.0
 
     unit_economics = calculate_cost_adjusted_geometry(
         direction=normalized["direction"],
