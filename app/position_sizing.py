@@ -214,7 +214,6 @@ def calculate_position_size(
     )
 
     if not fixed_risk_mode:
-        # Preserve the previous API behavior for legacy percentage sizing.
         selected_leverage = leverage_cap
         minimum_required_leverage = selected_leverage
         required_margin = notional / selected_leverage
@@ -232,9 +231,6 @@ def calculate_position_size(
         if usable_margin <= 0:
             return _reject("Required margin exceeds available balance")
 
-        # The 50% portfolio exposure limit is a hard ceiling, not a target. The
-        # minimum below is only an admission check; fixed-risk trades still use
-        # the approved profile leverage cap unless per-trade caps reject them.
         minimum_required_leverage = max(notional / usable_margin, 1.0)
         if minimum_required_leverage > leverage_cap + 1e-9:
             return _reject(
@@ -377,17 +373,7 @@ def _stale_reason(value: Any) -> str:
 
 def _resolve_trade_type(signal: dict[str, Any], settings: dict[str, Any]) -> str | None:
     explicit = str(signal.get("trade_type") or settings.get("trade_type") or "").lower().strip()
-    if explicit in PROFILE_CAPS:
-        return explicit
-
-    risk_amount = _positive_float(settings.get("risk_amount"))
-    if risk_amount is None:
-        return None
-
-    leverage_cap = _positive_float(settings.get("leverage_cap"))
-    if risk_amount >= 50.0 or (leverage_cap is not None and leverage_cap <= 10.0):
-        return "intraday"
-    return "scalping"
+    return explicit if explicit in PROFILE_CAPS else None
 
 
 def _profile_cap_value(trade_type: str | None, settings: dict[str, Any], cap_name: str) -> float | None:
