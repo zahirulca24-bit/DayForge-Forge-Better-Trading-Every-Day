@@ -25,7 +25,7 @@ class EntryAuthorityRuntimeEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(body["decision"], APPROVE)
         self.assertEqual(body["mode"], "dry_run_no_order_submission")
-        self.assertEqual(body["evidence"]["quote_source"], "orderbook")
+        self.assertEqual(body["quote"]["source"], "orderbook")
         self.assertEqual(fake_client.order_submit_calls, 0)
         log_event.assert_called_once()
 
