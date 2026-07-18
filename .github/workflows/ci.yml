@@ -51,6 +51,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Upload P0-1F frontend source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-1f-frontend-source
+          path: |
+            frontend/src/components/TradeHistory.tsx
+            frontend/src/components/PerformanceStrategy.tsx
+            frontend/src/components/ActiveTrades.tsx
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
