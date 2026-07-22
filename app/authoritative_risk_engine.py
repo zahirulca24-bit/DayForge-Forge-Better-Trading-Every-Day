@@ -5,22 +5,26 @@ import hashlib
 import hmac
 import json
 import secrets
+import logging
 from datetime import UTC, datetime, timedelta
 from math import isfinite
-from threading import Lock
 from typing import Any
+
+from sqlalchemy.exc import IntegrityError
 
 from app.bot_controls import get_execution_mode
 from app.config import settings
+from app.database import SessionLocal
 from app.execution_core import _build_execution_key
-from app.journal import get_trade_by_execution_key
+from app.journal import get_trade_by_execution_key, log_bot_event
+from app.models import ConsumedDecision
 from app.risk import extract_account_equity, refresh_risk_state, validate_trade
 from app.trading_costs import calculate_cost_adjusted_geometry
 
 
+logger = logging.getLogger(__name__)
+
 _APPROVAL_VERSION = 1
-_used_decisions: dict[str, datetime] = {}
-_approval_lock = Lock()
 
 
 def issue_execution_approval(
@@ -197,12 +201,29 @@ def verify_risk_approval(
     if not decision_id:
         return _reject("RISK_APPROVAL_INVALID", "Risk approval decision ID is missing")
 
-    with _approval_lock:
-        _purge_consumed(current)
-        if decision_id in _used_decisions:
+    db = SessionLocal()
+    try:
+        existing = db.query(ConsumedDecision).filter(ConsumedDecision.decision_id == decision_id).first()
+        if existing is not None:
             return _reject("RISK_APPROVAL_ALREADY_USED", "Risk approval has already been consumed")
+
         if consume:
-            _used_decisions[decision_id] = expires_at
+            row = ConsumedDecision(decision_id=decision_id, expires_at=expires_at)
+            db.add(row)
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                logger.warning("Replay detected for decision_id %s due to IntegrityError", decision_id)
+                log_bot_event(
+                    "RISK_APPROVAL_REPLAY",
+                    f"Risk approval has already been consumed (replay detected on concurrent insert): {decision_id}",
+                    level="warning",
+                    metadata={"decision_id": decision_id},
+                )
+                return _reject("RISK_APPROVAL_ALREADY_USED", "Risk approval has already been consumed")
+    finally:
+        db.close()
 
     return {"allowed": True, "reason": "", "error": None, "decision": decision}
 
@@ -343,12 +364,6 @@ def _as_utc(value: datetime | None) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
-
-
-def _purge_consumed(current: datetime) -> None:
-    expired = [decision_id for decision_id, expiry in _used_decisions.items() if current >= expiry]
-    for decision_id in expired:
-        _used_decisions.pop(decision_id, None)
 
 
 def _reject(code: str, reason: str, **evidence: Any) -> dict[str, Any]:

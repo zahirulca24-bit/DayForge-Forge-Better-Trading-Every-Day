@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import unittest
 from datetime import UTC, datetime, timedelta
+from tempfile import NamedTemporaryFile
 from unittest.mock import patch
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.database import Base
 from app.authoritative_risk_engine import issue_execution_approval, verify_risk_approval
 
 
@@ -59,9 +64,24 @@ RISK_STATE = {"active_symbols": [], "active_trade_count": 0, "available_risk": 5
 
 class AuthoritativeRiskEngineTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.database_file = NamedTemporaryFile(suffix=".db")
+        self.test_engine = create_engine(
+            f"sqlite:///{self.database_file.name}",
+            connect_args={"check_same_thread": False},
+        )
+        self.TestSession = sessionmaker(autocommit=False, autoflush=False, bind=self.test_engine)
+        Base.metadata.create_all(bind=self.test_engine)
+
+        session_patch = patch("app.authoritative_risk_engine.SessionLocal", self.TestSession)
+        session_patch.start()
+        self.addCleanup(session_patch.stop)
+
         mode_patch = patch("app.authoritative_risk_engine.get_execution_mode", return_value="demo")
         mode_patch.start()
         self.addCleanup(mode_patch.stop)
+
+    def tearDown(self) -> None:
+        self.database_file.close()
 
     def test_signed_approval_is_signal_bound_short_lived_and_one_time(self) -> None:
         payload = signal()
@@ -157,6 +177,51 @@ class AuthoritativeRiskEngineTests(unittest.TestCase):
         )
         self.assertFalse(mismatch["allowed"])
         self.assertEqual(mismatch["error"], "RISK_APPROVAL_SIGNAL_MISMATCH")
+
+    def test_replay_uniqueness_integrity_error_handling(self) -> None:
+        payload = signal()
+        with patch("app.authoritative_risk_engine.get_trade_by_execution_key", return_value=None):
+            approval = issue_execution_approval(
+                FakeClient(),
+                {**payload, "auto_triggered": True},
+                auto_triggered=True,
+                now=NOW,
+                wallet={"totalEquity": "1000"},
+                positions=[],
+                account_equity=1000.0,
+                validation=VALIDATION,
+                risk_state=RISK_STATE,
+            )
+
+        from sqlalchemy.exc import IntegrityError
+
+        # We patch Session.commit on the instance that verify_risk_approval creates.
+        # But patching SessionLocal().commit is easiest:
+        original_session_maker = self.TestSession
+        class FakeSessionRace:
+            def __init__(self, *args, **kwargs):
+                self.session = original_session_maker(*args, **kwargs)
+            def __getattr__(self, name):
+                return getattr(self.session, name)
+            def commit(self):
+                raise IntegrityError("simulate race", {}, None)
+
+        with (
+            patch("app.authoritative_risk_engine.log_bot_event") as mock_log_bot_event,
+            patch("app.authoritative_risk_engine.SessionLocal", FakeSessionRace)
+        ):
+            replay = verify_risk_approval(
+                approval["token"],
+                {**payload, "auto_triggered": True},
+                execution_mode="demo",
+                consume=True,
+                now=NOW,
+            )
+            self.assertFalse(replay["allowed"])
+            self.assertEqual(replay["error"], "RISK_APPROVAL_ALREADY_USED")
+            mock_log_bot_event.assert_called_once()
+            args, kwargs = mock_log_bot_event.call_args
+            self.assertEqual(args[0], "RISK_APPROVAL_REPLAY")
 
 
 if __name__ == "__main__":
