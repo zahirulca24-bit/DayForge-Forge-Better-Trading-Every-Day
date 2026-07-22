@@ -171,6 +171,86 @@ class BacktestLiveParityTests(unittest.TestCase):
         self.assertEqual(result["max_hold_candles"], 30)
         self.assertTrue(result["live_pipeline_parity"]["trend_gate"])
         self.assertTrue(result["live_pipeline_parity"]["canonical_signal_gate"])
+        self.assertTrue(result["live_pipeline_parity"]["profile_rr_gate"])
+
+    def test_backtest_net_rr_gating_rejects_due_to_slippage(self) -> None:
+        # A breakout signal that has exactly 1.5 raw RR, which normally passes, but with slippage/fees, net RR is lower
+        def evaluator(symbol, setup, trigger, now=None):
+            return [{
+                "symbol": symbol,
+                "strategy_name": "breakout",
+                "strategy": "breakout",
+                "direction": "long",
+                "entry": 100.0,
+                "stop_loss": 99.0,
+                "take_profit": 101.5,
+                "risk_reward": 1.5,
+                "detected_at": "2026-07-15T12:00:00+00:00",
+                "status": "active",
+                "confidence_score": 85,
+                "rejection_reason": None,
+            }]
+
+        with patch("app.backtest._strategy_evaluator", return_value=evaluator):
+            signal, results = _evaluate_profiled_signal(
+                "breakout",
+                "BTCUSDT",
+                "scalping",
+                [],
+                [],
+                datetime(2026, 7, 15, 12, 0, tzinfo=UTC),
+                trend={"state": TREND_UP, "strength": 90.0, "reason": "test"},
+                scanner_logic={"status": "eligible", "direction": "long", "reason": "test"},
+                timeframes=SCALPING_PROFILE.timeframes(),
+                fee_bps=5.5,
+                slippage_bps=2.0,  # Adding slippage will drag Net RR below the minimum 1.5 threshold
+            )
+
+        self.assertIsNone(signal)  # Rejected
+        self.assertEqual(results[0]["signal_state"], "INVALID")
+        self.assertEqual(results[0]["rejection_reason"], "risk_reward_below_trade_type_minimum")
+        self.assertLess(results[0]["net_risk_reward"], 1.5)
+
+    def test_slippage_parameter_reduces_net_pnl_in_backtest_simulation(self) -> None:
+        # Check simulation with and without slippage
+        from app.backtest import _simulate_trade
+        signal = {
+            "strategy_name": "breakout",
+            "direction": "long",
+            "entry": 100.0,
+            "stop_loss": 99.0,
+            "take_profit": 102.0,
+            "risk_reward": 2.0,
+        }
+        candles = [
+            {"high": 103.0, "low": 99.5, "open": 100.0, "close": 102.0, "timestamp": "2026-07-15T12:01:00Z"}
+        ]
+
+        # Scenario A: No slippage
+        outcome_no_slippage = _simulate_trade(
+            signal,
+            candles,
+            start_index=0,
+            risk_amount=10.0,
+            fee_rate=0.00055,
+            slippage_rate=0.0,
+            max_hold_candles=10,
+        )
+        # Scenario B: With 2 bps slippage
+        outcome_with_slippage = _simulate_trade(
+            signal,
+            candles,
+            start_index=0,
+            risk_amount=10.0,
+            fee_rate=0.00055,
+            slippage_rate=0.0002,
+            max_hold_candles=10,
+        )
+
+        self.assertIsNotNone(outcome_no_slippage)
+        self.assertIsNotNone(outcome_with_slippage)
+        self.assertLess(outcome_with_slippage["net_pnl"], outcome_no_slippage["net_pnl"])
+        self.assertGreater(outcome_with_slippage["slippage"], 0.0)
 
 
 if __name__ == "__main__":

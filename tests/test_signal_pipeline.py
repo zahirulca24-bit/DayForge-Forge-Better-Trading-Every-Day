@@ -139,6 +139,7 @@ class SignalPipelineTests(unittest.TestCase):
     def test_intraday_requires_two_r_minimum(self) -> None:
         raw = self._raw_signal(status="active")
         raw["risk_reward"] = 1.5
+        raw["take_profit"] = 101.5
         result = normalize_strategy_result(
             symbol="BTCUSDT",
             result=raw,

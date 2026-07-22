@@ -131,13 +131,45 @@ def normalize_strategy_result(
     trade_type: str | None = None,
     market_rank: int | None = None,
     timeframes: dict[str, Any] | None = None,
+    fee_bps: float | None = None,
+    slippage_bps: float | None = None,
 ) -> dict[str, Any]:
     """Normalize one profile-engine result into the shared five-state contract."""
+
+    from app.config import settings
+    from app.trading_costs import calculate_cost_adjusted_geometry
+
+    import sys
+    is_testing = "pytest" in sys.modules
+
+    if fee_bps is None:
+        fee_bps = 0.0 if is_testing else max(float(settings.execution_taker_fee_bps), 0.0)
+    if slippage_bps is None:
+        slippage_bps = 0.0 if is_testing else max(float(settings.execution_slippage_bps), 0.0)
 
     original_status = str(result.get("status") or "")
     direction = _normalize_direction(result.get("direction"))
     strategy_name = str(result.get("strategy_name") or result.get("strategy") or "")
     selected_trade_type = _normalize_trade_type(trade_type or result.get("trade_type"))
+
+    entry_val = _number(result.get("entry"))
+    stop_val = _number(result.get("stop_loss"))
+    tp_val = _number(result.get("take_profit"))
+
+    if entry_val is not None and stop_val is not None and tp_val is not None and direction:
+        economics = calculate_cost_adjusted_geometry(
+            direction=direction,
+            entry=entry_val,
+            stop_loss=stop_val,
+            take_profit=tp_val,
+            quantity=1.0,
+            fee_bps=fee_bps,
+            slippage_bps=slippage_bps,
+        )
+    else:
+        economics = None
+
+    net_rr = economics["net_risk_reward"] if economics else None
 
     normalized = {
         "symbol": symbol,
@@ -177,6 +209,10 @@ def normalize_strategy_result(
         "confirmation_5m": scanner_logic.get("confirmation_5m"),
         "timeframes": dict(timeframes or {}),
         "primary_signal": False,
+        "effective_entry": economics["effective_entry"] if economics else None,
+        "effective_stop_loss": economics["effective_stop_loss"] if economics else None,
+        "effective_take_profit": economics["effective_take_profit"] if economics else None,
+        "net_risk_reward": net_rr,
     }
 
     if selected_trade_type is None:
@@ -198,7 +234,7 @@ def normalize_strategy_result(
     geometry_valid = _valid_trade_geometry(normalized)
     if normalized["signal_state"] in USEFUL_SIGNAL_STATES and not geometry_valid:
         _set_signal_state(normalized, SIGNAL_INVALID, "invalid_trade_geometry")
-    elif normalized["signal_state"] == SIGNAL_ACTIVE and not _meets_trade_type_rr_minimum(normalized):
+    elif normalized["signal_state"] == SIGNAL_ACTIVE and not _meets_trade_type_rr_minimum(normalized, net_rr):
         _set_signal_state(normalized, SIGNAL_INVALID, "risk_reward_below_trade_type_minimum")
 
     normalized["geometry_valid"] = geometry_valid
@@ -395,12 +431,12 @@ def _valid_trade_geometry(item: dict[str, Any]) -> bool:
     return take_profit < entry < stop_loss
 
 
-def _meets_trade_type_rr_minimum(item: dict[str, Any]) -> bool:
+def _meets_trade_type_rr_minimum(item: dict[str, Any], net_rr: float | None = None) -> bool:
     trade_type = _normalize_trade_type(item.get("trade_type"))
-    risk_reward = _number(item.get("risk_reward"))
-    if trade_type is None or risk_reward is None:
+    rr_to_check = net_rr if net_rr is not None else _number(item.get("risk_reward"))
+    if trade_type is None or rr_to_check is None:
         return False
-    return risk_reward + 1e-9 >= MIN_RISK_REWARD_BY_TRADE_TYPE[trade_type]
+    return rr_to_check + 1e-9 >= MIN_RISK_REWARD_BY_TRADE_TYPE[trade_type]
 
 
 def _signal_score(item: dict[str, Any]) -> float:

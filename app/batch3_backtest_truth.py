@@ -134,6 +134,7 @@ def _simulate_trade_next_open(
     start_index: int,
     risk_amount: float,
     fee_rate: float,
+    slippage_rate: float = 0.0,
     max_hold_candles: int,
 ) -> dict[str, Any] | None:
     direction = str(signal.get("direction") or "").lower()
@@ -161,6 +162,7 @@ def _simulate_trade_next_open(
     quantity = risk_amount / risk_distance
     actual_rr = reward_distance / risk_distance
     entry_fee = abs(entry * quantity) * max(fee_rate, 0.0)
+    entry_slippage_val = abs(entry * quantity) * max(slippage_rate, 0.0)
     max_exit_index = min(len(candles), start_index + max_hold_candles)
 
     for exit_index in range(start_index, max_exit_index):
@@ -185,7 +187,11 @@ def _simulate_trade_next_open(
         gross_pnl = ((exit_price - entry) if direction == "long" else (entry - exit_price)) * quantity
         exit_fee = abs(exit_price * quantity) * max(fee_rate, 0.0)
         fees = entry_fee + exit_fee
-        net_pnl = gross_pnl - fees
+
+        exit_slippage_val = abs(exit_price * quantity) * max(slippage_rate, 0.0)
+        slippage = entry_slippage_val + exit_slippage_val
+
+        net_pnl = gross_pnl - fees - slippage
         close_time = candle.get("_backtest_close_timestamp") or candle.get("timestamp")
         return {
             "strategy": signal.get("strategy_name") or signal.get("strategy"),
@@ -218,6 +224,7 @@ def _simulate_trade_next_open(
             "entry_fee": entry_fee,
             "exit_fee": exit_fee,
             "fees": fees,
+            "slippage": slippage,
             "net_pnl": net_pnl,
             "pnl_r": net_pnl / risk_amount if risk_amount else 0.0,
             "gross_r": gross_pnl / risk_amount if risk_amount else 0.0,

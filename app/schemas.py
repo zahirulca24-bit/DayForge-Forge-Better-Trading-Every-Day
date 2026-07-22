@@ -86,5 +86,6 @@ class BacktestRequest(BaseModel):
     candle_offset: int = 0
     risk_amount: float | None = None
     fee_bps: float = 5.5
+    slippage_bps: float = 0.0
     min_risk_reward: float | None = None
     max_hold_candles: int | None = None

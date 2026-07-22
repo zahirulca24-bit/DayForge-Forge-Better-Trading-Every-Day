@@ -75,6 +75,22 @@ def calculate_cost_adjusted_geometry(
     gross_rr = gross_reward / gross_risk if gross_risk > 0 else 0.0
     net_rr = net_reward / net_risk if net_risk > 0 and net_reward > 0 else 0.0
 
+    fee_per_unit = estimated_entry_fee / qty if qty > 0 else 0.0
+    slippage_per_unit = entry_slippage / qty if qty > 0 else 0.0
+    stop_exit_fee_per_unit = stop_exit_fee / qty if qty > 0 else 0.0
+    stop_exit_slippage_per_unit = stop_exit_slippage / qty if qty > 0 else 0.0
+    target_exit_fee_per_unit = target_exit_fee / qty if qty > 0 else 0.0
+    target_exit_slippage_per_unit = target_exit_slippage / qty if qty > 0 else 0.0
+
+    if normalized_direction == "long":
+        effective_entry = entry_value + fee_per_unit + slippage_per_unit
+        effective_stop_loss = stop_value - stop_exit_fee_per_unit - stop_exit_slippage_per_unit
+        effective_take_profit = target_value - target_exit_fee_per_unit - target_exit_slippage_per_unit
+    else:
+        effective_entry = entry_value - fee_per_unit - slippage_per_unit
+        effective_stop_loss = stop_value + stop_exit_fee_per_unit + stop_exit_slippage_per_unit
+        effective_take_profit = target_value + target_exit_fee_per_unit + target_exit_slippage_per_unit
+
     return {
         "quantity": qty,
         "fee_bps": fee_rate * 10_000.0,
@@ -95,4 +111,7 @@ def calculate_cost_adjusted_geometry(
         "net_risk": net_risk,
         "net_reward": net_reward,
         "net_risk_reward": net_rr,
+        "effective_entry": effective_entry,
+        "effective_stop_loss": effective_stop_loss,
+        "effective_take_profit": effective_take_profit,
     }

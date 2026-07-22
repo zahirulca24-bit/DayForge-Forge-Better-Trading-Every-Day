@@ -25,6 +25,7 @@ def run_strategy_backtest(
     candle_offset: int = 0,
     risk_amount: float | None = None,
     fee_bps: float = 5.5,
+    slippage_bps: float = 0.0,
     min_risk_reward: float | None = None,
     max_hold_candles: int | None = None,
 ) -> dict[str, Any]:
@@ -135,6 +136,8 @@ def run_strategy_backtest(
             trend=trend,
             scanner_logic=scanner_logic,
             timeframes=profile["timeframes"],
+            fee_bps=fee_bps,
+            slippage_bps=slippage_bps,
         )
         signal_checks += len(normalized_results)
         if signal is None:
@@ -142,7 +145,25 @@ def run_strategy_backtest(
             _increment(skipped_by_reason, _best_rejection_reason(normalized_results))
             index += 1
             continue
-        if float(signal.get("risk_reward") or 0.0) + 1e-9 < rr_floor:
+
+        from app.trading_costs import calculate_cost_adjusted_geometry
+        economics = calculate_cost_adjusted_geometry(
+            direction=signal.get("direction"),
+            entry=signal.get("entry"),
+            stop_loss=signal.get("stop_loss"),
+            take_profit=signal.get("take_profit"),
+            quantity=1.0,
+            fee_bps=fee_bps,
+            slippage_bps=slippage_bps,
+        )
+        if economics is None or economics.get("net_reward", 0.0) <= 0:
+            skipped_signals += 1
+            _increment(skipped_by_reason, "invalid_trade_geometry")
+            index += 1
+            continue
+
+        net_rr = economics.get("net_risk_reward") or 0.0
+        if net_rr + 1e-9 < rr_floor:
             skipped_signals += 1
             _increment(skipped_by_reason, "risk_reward_below_backtest_floor")
             index += 1
@@ -162,12 +183,14 @@ def run_strategy_backtest(
             continue
         last_signal_key = signal_key
 
+        slippage_rate = max(float(slippage_bps or 0.0), 0.0) / 10_000
         outcome = _simulate_trade(
             signal,
             candles_trigger,
             start_index=index + 1,
             risk_amount=risk_usdt,
             fee_rate=fee_rate,
+            slippage_rate=slippage_rate,
             max_hold_candles=hold_limit,
         )
         if outcome is None:
@@ -208,6 +231,7 @@ def run_strategy_backtest(
         "candle_offset": offset,
         "risk_amount": risk_usdt,
         "fee_bps": fee_bps,
+        "slippage_bps": slippage_bps,
         "min_risk_reward": rr_floor,
         "max_hold_candles": hold_limit,
         "max_hold_minutes": hold_limit * profile["trigger_minutes"],
@@ -282,6 +306,8 @@ def _evaluate_profiled_signal(
     trend: dict[str, Any],
     scanner_logic: dict[str, Any],
     timeframes: dict[str, Any],
+    fee_bps: float = 5.5,
+    slippage_bps: float = 0.0,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     evaluator = _strategy_evaluator(strategy)
     if evaluator is None:
@@ -306,6 +332,8 @@ def _evaluate_profiled_signal(
             market_ranking={"score": 0.0, "components": {"source": "historical_backtest"}},
             scanner_logic=scanner_logic,
             timeframes=timeframes,
+            fee_bps=fee_bps,
+            slippage_bps=slippage_bps,
         )
         for key in ("setup_timeframe_used", "setup_candle_count", "trigger_candle_count", "setup_detected_at"):
             if key in raw:
@@ -376,6 +404,7 @@ def _simulate_trade(
     start_index: int,
     risk_amount: float,
     fee_rate: float,
+    slippage_rate: float = 0.0,
     max_hold_candles: int,
 ) -> dict[str, Any] | None:
     direction = str(signal.get("direction") or "").lower()
@@ -390,8 +419,6 @@ def _simulate_trade(
         return None
 
     quantity = risk_amount / risk_distance
-    notional = entry * quantity
-    fees = notional * fee_rate * 2
     max_exit_index = min(len(candles), start_index + max_hold_candles)
     for exit_index in range(start_index, max_exit_index):
         candle = candles[exit_index]
@@ -415,7 +442,16 @@ def _simulate_trade(
         exit_price = stop if stop_hit else target
         pnl_r = -1.0 if result == "loss" else rr
         gross_pnl = pnl_r * risk_amount
-        net_pnl = gross_pnl - fees
+
+        entry_fee = entry * quantity * fee_rate
+        exit_fee = exit_price * quantity * fee_rate
+        fees = entry_fee + exit_fee
+
+        entry_slippage = entry * quantity * slippage_rate
+        exit_slippage = exit_price * quantity * slippage_rate
+        slippage = entry_slippage + exit_slippage
+
+        net_pnl = gross_pnl - fees - slippage
         return {
             "strategy": signal.get("strategy_name") or signal.get("strategy"),
             "trade_type": signal.get("trade_type"),
@@ -443,6 +479,7 @@ def _simulate_trade(
             "quantity": quantity,
             "gross_pnl": gross_pnl,
             "fees": fees,
+            "slippage": slippage,
             "net_pnl": net_pnl,
             "pnl_r": net_pnl / risk_amount if risk_amount else 0.0,
             "trend_state": signal.get("trend_state"),
