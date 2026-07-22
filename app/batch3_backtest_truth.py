@@ -5,6 +5,8 @@ from functools import wraps
 from math import isfinite
 from typing import Any, Callable
 
+from app.trading_costs import calculate_cost_adjusted_geometry
+
 _INSTALLED = False
 _ORIGINAL_RUN: Callable[..., dict[str, Any]] | None = None
 _ORIGINAL_SIMULATE: Callable[..., dict[str, Any] | None] | None = None
@@ -133,7 +135,9 @@ def _simulate_trade_next_open(
     *,
     start_index: int,
     risk_amount: float,
-    fee_rate: float,
+    fee_bps: float | None = None,
+    slippage_bps: float | None = None,
+    fee_rate: float | None = None,
     max_hold_candles: int,
 ) -> dict[str, Any] | None:
     direction = str(signal.get("direction") or "").lower()
@@ -158,9 +162,45 @@ def _simulate_trade_next_open(
     reward_distance = abs(target - entry)
     if risk_distance <= 0 or reward_distance <= 0:
         return None
+
+    resolved_fee_bps = fee_bps
+    if resolved_fee_bps is None:
+        if fee_rate is not None:
+            resolved_fee_bps = float(fee_rate) * 10_000.0
+        else:
+            resolved_fee_bps = 5.5
+
+    resolved_slippage_bps = slippage_bps if slippage_bps is not None else 2.0
+
+    economics_qty_1 = calculate_cost_adjusted_geometry(
+        direction=direction,
+        entry=entry,
+        stop_loss=stop,
+        take_profit=target,
+        quantity=1.0,
+        fee_bps=resolved_fee_bps,
+        slippage_bps=resolved_slippage_bps,
+    )
+    if economics_qty_1 is None:
+        return None
+
+    actual_rr = economics_qty_1["gross_risk_reward"]
+    net_rr = economics_qty_1["net_risk_reward"]
+
     quantity = risk_amount / risk_distance
-    actual_rr = reward_distance / risk_distance
-    entry_fee = abs(entry * quantity) * max(fee_rate, 0.0)
+
+    economics = calculate_cost_adjusted_geometry(
+        direction=direction,
+        entry=entry,
+        stop_loss=stop,
+        take_profit=target,
+        quantity=quantity,
+        fee_bps=resolved_fee_bps,
+        slippage_bps=resolved_slippage_bps,
+    )
+    if economics is None:
+        return None
+
     max_exit_index = min(len(candles), start_index + max_hold_candles)
 
     for exit_index in range(start_index, max_exit_index):
@@ -182,10 +222,23 @@ def _simulate_trade_next_open(
         # OHLC cannot prove intra-candle ordering. If both print, assume the loss first.
         result = "loss" if stop_hit else "win"
         exit_price = stop if stop_hit else target
-        gross_pnl = ((exit_price - entry) if direction == "long" else (entry - exit_price)) * quantity
-        exit_fee = abs(exit_price * quantity) * max(fee_rate, 0.0)
+
+        entry_fee = economics["estimated_entry_fee"]
+        entry_slippage_cost = economics["estimated_entry_slippage"]
+
+        if result == "loss":
+            exit_fee = economics["estimated_stop_exit_fee"]
+            exit_slippage_cost = economics["estimated_stop_exit_slippage"]
+            gross_pnl = - economics["gross_risk"]
+            net_pnl = - economics["net_risk"]
+        else:
+            exit_fee = economics["estimated_target_exit_fee"]
+            exit_slippage_cost = economics["estimated_target_exit_slippage"]
+            gross_pnl = economics["gross_reward"]
+            net_pnl = economics["net_reward"]
+
         fees = entry_fee + exit_fee
-        net_pnl = gross_pnl - fees
+        slippage = entry_slippage_cost + exit_slippage_cost
         close_time = candle.get("_backtest_close_timestamp") or candle.get("timestamp")
         return {
             "strategy": signal.get("strategy_name") or signal.get("strategy"),
@@ -212,12 +265,16 @@ def _simulate_trade_next_open(
             "closed_at": close_time,
             "exit_index": exit_index,
             "risk_reward": round(actual_rr, 8),
+            "net_risk_reward": net_rr,
             "strategy_risk_reward": signal.get("risk_reward"),
             "quantity": quantity,
             "gross_pnl": gross_pnl,
             "entry_fee": entry_fee,
             "exit_fee": exit_fee,
             "fees": fees,
+            "entry_slippage_cost": entry_slippage_cost,
+            "exit_slippage_cost": exit_slippage_cost,
+            "slippage": slippage,
             "net_pnl": net_pnl,
             "pnl_r": net_pnl / risk_amount if risk_amount else 0.0,
             "gross_r": gross_pnl / risk_amount if risk_amount else 0.0,

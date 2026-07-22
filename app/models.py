@@ -132,10 +132,9 @@ class ScannerSnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
-class ConsumedDecision(Base):
-    __tablename__ = "consumed_decisions"
+class ConsumedRiskApproval(Base):
+    __tablename__ = "consumed_risk_approvals"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    decision_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    decision_id: Mapped[str] = mapped_column(String(64), primary_key=True, index=True)
+    consumed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -201,10 +201,14 @@ class AuthoritativeRiskEngineTests(unittest.TestCase):
         class FakeSessionRace:
             def __init__(self, *args, **kwargs):
                 self.session = original_session_maker(*args, **kwargs)
+                self.commit_count = 0
             def __getattr__(self, name):
                 return getattr(self.session, name)
             def commit(self):
-                raise IntegrityError("simulate race", {}, None)
+                self.commit_count += 1
+                if self.commit_count > 1:
+                    raise IntegrityError("simulate race", {}, None)
+                return self.session.commit()
 
         with (
             patch("app.authoritative_risk_engine.log_bot_event") as mock_log_bot_event,

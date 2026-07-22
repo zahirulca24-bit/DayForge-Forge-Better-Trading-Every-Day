@@ -17,7 +17,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.execution_core import _build_execution_key
 from app.journal import get_trade_by_execution_key, log_bot_event
-from app.models import ConsumedDecision
+from app.models import ConsumedRiskApproval
 from app.risk import extract_account_equity, refresh_risk_state, validate_trade
 from app.trading_costs import calculate_cost_adjusted_geometry
 
@@ -203,13 +203,22 @@ def verify_risk_approval(
 
     db = SessionLocal()
     try:
-        existing = db.query(ConsumedDecision).filter(ConsumedDecision.decision_id == decision_id).first()
+        # Purge expired approvals to keep database table size bounded
+        db.query(ConsumedRiskApproval).filter(ConsumedRiskApproval.expires_at <= current).delete()
+        db.commit()
+
+        # Check if already consumed
+        existing = db.query(ConsumedRiskApproval).filter(ConsumedRiskApproval.decision_id == decision_id).first()
         if existing is not None:
             return _reject("RISK_APPROVAL_ALREADY_USED", "Risk approval has already been consumed")
 
         if consume:
-            row = ConsumedDecision(decision_id=decision_id, expires_at=expires_at)
-            db.add(row)
+            consumed_record = ConsumedRiskApproval(
+                decision_id=decision_id,
+                consumed_at=current,
+                expires_at=expires_at,
+            )
+            db.add(consumed_record)
             try:
                 db.commit()
             except IntegrityError:
