@@ -4,12 +4,14 @@ from datetime import datetime
 from math import ceil, isfinite
 from typing import Any, Callable
 
+from app.config import settings as app_settings
 from app.engines import evaluate_engine_strategies, get_engine_profile
 from app.exchange import BybitClient
 from app.scanner_logic import evaluate_multitimeframe_logic
 from app.scanner_trend import TREND_DOWN, TREND_UP, analyze_trend
 from app.signal_pipeline import SIGNAL_ACTIVE, normalize_strategy_result
 from app.strategy import evaluate_registered_strategies, get_strategy_registry
+from app.trading_costs import calculate_cost_adjusted_geometry
 
 
 StrategyEvaluator = Callable[[str, list[dict[str, Any]], list[dict[str, Any]], datetime | None], list[dict[str, Any]]]
@@ -25,6 +27,7 @@ def run_strategy_backtest(
     candle_offset: int = 0,
     risk_amount: float | None = None,
     fee_bps: float = 5.5,
+    slippage_bps: float = 2.0,
     min_risk_reward: float | None = None,
     max_hold_candles: int | None = None,
 ) -> dict[str, Any]:
@@ -46,7 +49,8 @@ def run_strategy_backtest(
     risk_usdt = resolved["risk_amount"]
     rr_floor = resolved["min_risk_reward"]
     hold_limit = resolved["max_hold_candles"]
-    fee_rate = max(float(fee_bps or 0.0), 0.0) / 10_000
+    fee_bps = float(fee_bps)
+    slippage_bps = float(slippage_bps)
 
     trigger_fetch_limit = min(5000, limit + offset)
     ok_trigger, trigger_raw, trigger_error = client.safe_fetch_recent_candles(
@@ -142,9 +146,26 @@ def run_strategy_backtest(
             _increment(skipped_by_reason, _best_rejection_reason(normalized_results))
             index += 1
             continue
-        if float(signal.get("risk_reward") or 0.0) + 1e-9 < rr_floor:
+
+        economics = calculate_cost_adjusted_geometry(
+            direction=signal["direction"],
+            entry=float(signal["entry"]),
+            stop_loss=float(signal["stop_loss"]),
+            take_profit=float(signal["take_profit"]),
+            quantity=1.0,
+            fee_bps=fee_bps,
+            slippage_bps=slippage_bps,
+        )
+        if economics is None or economics["net_reward"] <= 0:
             skipped_signals += 1
-            _increment(skipped_by_reason, "risk_reward_below_backtest_floor")
+            _increment(skipped_by_reason, "fee_viability_rejected")
+            index += 1
+            continue
+
+        net_rr = economics["net_risk_reward"]
+        if net_rr + 1e-9 < rr_floor:
+            skipped_signals += 1
+            _increment(skipped_by_reason, "net_risk_reward_below_backtest_floor")
             index += 1
             continue
 
@@ -167,7 +188,8 @@ def run_strategy_backtest(
             candles_trigger,
             start_index=index + 1,
             risk_amount=risk_usdt,
-            fee_rate=fee_rate,
+            fee_bps=fee_bps,
+            slippage_bps=slippage_bps,
             max_hold_candles=hold_limit,
         )
         if outcome is None:
@@ -186,6 +208,8 @@ def run_strategy_backtest(
     gross_loss = abs(sum(trade["net_pnl"] for trade in losses))
     max_drawdown = _max_drawdown(equity_curve)
 
+    applied_fee_adjusted_gate = (fee_bps > 0.0 or slippage_bps > 0.0)
+
     return {
         "ok": True,
         "symbol": normalized_symbol,
@@ -196,7 +220,7 @@ def run_strategy_backtest(
             "profile_engine": True,
             "trend_gate": True,
             "canonical_signal_gate": True,
-            "profile_rr_gate": True,
+            "profile_rr_gate": applied_fee_adjusted_gate,
             "management_simulation": "single_exit_conservative",
             "custom_parameter_override": not resolved["uses_canonical_defaults"],
         },
@@ -208,6 +232,7 @@ def run_strategy_backtest(
         "candle_offset": offset,
         "risk_amount": risk_usdt,
         "fee_bps": fee_bps,
+        "slippage_bps": slippage_bps,
         "min_risk_reward": rr_floor,
         "max_hold_candles": hold_limit,
         "max_hold_minutes": hold_limit * profile["trigger_minutes"],
@@ -375,23 +400,59 @@ def _simulate_trade(
     *,
     start_index: int,
     risk_amount: float,
-    fee_rate: float,
+    fee_bps: float | None = None,
+    slippage_bps: float | None = None,
+    fee_rate: float | None = None,
     max_hold_candles: int,
 ) -> dict[str, Any] | None:
     direction = str(signal.get("direction") or "").lower()
     entry = _number(signal.get("entry"))
     stop = _number(signal.get("stop_loss"))
     target = _number(signal.get("take_profit"))
-    rr = _number(signal.get("risk_reward")) or 0.0
     if direction not in {"long", "short"} or entry is None or stop is None or target is None:
         return None
     risk_distance = abs(entry - stop)
     if risk_distance <= 0 or not isfinite(risk_distance):
         return None
 
+    resolved_fee_bps = fee_bps
+    if resolved_fee_bps is None:
+        if fee_rate is not None:
+            resolved_fee_bps = float(fee_rate) * 10_000.0
+        else:
+            resolved_fee_bps = 5.5
+
+    resolved_slippage_bps = slippage_bps if slippage_bps is not None else 2.0
+
+    economics_qty_1 = calculate_cost_adjusted_geometry(
+        direction=direction,
+        entry=entry,
+        stop_loss=stop,
+        take_profit=target,
+        quantity=1.0,
+        fee_bps=resolved_fee_bps,
+        slippage_bps=resolved_slippage_bps,
+    )
+    if economics_qty_1 is None:
+        return None
+
+    rr = economics_qty_1["gross_risk_reward"]
+    net_rr = economics_qty_1["net_risk_reward"]
+
     quantity = risk_amount / risk_distance
-    notional = entry * quantity
-    fees = notional * fee_rate * 2
+
+    economics = calculate_cost_adjusted_geometry(
+        direction=direction,
+        entry=entry,
+        stop_loss=stop,
+        take_profit=target,
+        quantity=quantity,
+        fee_bps=resolved_fee_bps,
+        slippage_bps=resolved_slippage_bps,
+    )
+    if economics is None:
+        return None
+
     max_exit_index = min(len(candles), start_index + max_hold_candles)
     for exit_index in range(start_index, max_exit_index):
         candle = candles[exit_index]
@@ -410,12 +471,26 @@ def _simulate_trade(
         if not stop_hit and not target_hit:
             continue
 
-        # If both levels print inside one candle, use the conservative stop-first assumption.
         result = "loss" if stop_hit else "win"
         exit_price = stop if stop_hit else target
-        pnl_r = -1.0 if result == "loss" else rr
-        gross_pnl = pnl_r * risk_amount
-        net_pnl = gross_pnl - fees
+
+        entry_fee = economics["estimated_entry_fee"]
+        entry_slippage = economics["estimated_entry_slippage"]
+
+        if result == "loss":
+            exit_fee = economics["estimated_stop_exit_fee"]
+            exit_slippage = economics["estimated_stop_exit_slippage"]
+            gross_pnl = - economics["gross_risk"]
+            net_pnl = - economics["net_risk"]
+        else:
+            exit_fee = economics["estimated_target_exit_fee"]
+            exit_slippage = economics["estimated_target_exit_slippage"]
+            gross_pnl = economics["gross_reward"]
+            net_pnl = economics["net_reward"]
+
+        fees = entry_fee + exit_fee
+        slippage = entry_slippage + exit_slippage
+
         return {
             "strategy": signal.get("strategy_name") or signal.get("strategy"),
             "trade_type": signal.get("trade_type"),
