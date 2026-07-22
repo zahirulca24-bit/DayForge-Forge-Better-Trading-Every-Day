@@ -130,3 +130,11 @@ class ScannerSnapshot(Base):
     scanner_config_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ConsumedRiskApproval(Base):
+    __tablename__ = "consumed_risk_approvals"
+
+    decision_id: Mapped[str] = mapped_column(String(64), primary_key=True, index=True)
+    consumed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

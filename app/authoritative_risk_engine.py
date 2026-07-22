@@ -197,12 +197,35 @@ def verify_risk_approval(
     if not decision_id:
         return _reject("RISK_APPROVAL_INVALID", "Risk approval decision ID is missing")
 
-    with _approval_lock:
-        _purge_consumed(current)
-        if decision_id in _used_decisions:
+    from app.database import SessionLocal
+    from app.models import ConsumedRiskApproval
+    from sqlalchemy.exc import IntegrityError
+
+    db = SessionLocal()
+    try:
+        # Purge expired approvals to keep database table size bounded
+        db.query(ConsumedRiskApproval).filter(ConsumedRiskApproval.expires_at <= current).delete()
+        db.commit()
+
+        # Check if already consumed
+        existing = db.query(ConsumedRiskApproval).filter(ConsumedRiskApproval.decision_id == decision_id).first()
+        if existing is not None:
             return _reject("RISK_APPROVAL_ALREADY_USED", "Risk approval has already been consumed")
+
         if consume:
-            _used_decisions[decision_id] = expires_at
+            consumed_record = ConsumedRiskApproval(
+                decision_id=decision_id,
+                consumed_at=current,
+                expires_at=expires_at,
+            )
+            db.add(consumed_record)
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                return _reject("RISK_APPROVAL_ALREADY_USED", "Risk approval has already been consumed")
+    finally:
+        db.close()
 
     return {"allowed": True, "reason": "", "error": None, "decision": decision}
 
