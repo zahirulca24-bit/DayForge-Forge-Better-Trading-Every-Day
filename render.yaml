@@ -1,0 +1,54 @@
+services:
+  - type: web
+    name: drayfrogd-backend
+    runtime: python
+    plan: free
+    rootDir: .
+    buildCommand: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+    startCommand: python -m app.database_bootstrap && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: drayfrogd-db
+          property: connectionString
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: FRONTEND_URL
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: BYBIT_DEMO_API_KEY
+        sync: false
+      - key: BYBIT_DEMO_API_SECRET
+        sync: false
+      - key: BYBIT_LIVE_API_KEY
+        sync: false
+      - key: BYBIT_LIVE_API_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
+  - type: web
+    name: drayfrogd-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
+
+databases:
+  - name: drayfrogd-db
+    plan: free
+    databaseName: drayfrogd
+    user: drayfrogd

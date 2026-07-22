@@ -1,0 +1,17 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+fix_*
+patch_*
+test-*
+test*
+generate_dashboard.cjs
+rewrite_dashboard.cjs
+update_*
+server.ts
+src/lib/

@@ -1,0 +1,704 @@
+export interface BotSettings {
+  maxActiveTrades: number;
+  riskPerTrade: number;
+  targetProfit: number;
+  scannerUniverse: string[];
+  timeframe: string;
+  leverage: number;
+}
+
+export interface Trade {
+  id: string;
+  pair: string;
+  strategy: string;
+  direction: 'LONG' | 'SHORT';
+  entryPrice: number;
+  currentPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  size: number;
+  margin: number | null;
+  leverage: number | null;
+  unrealizedPnl: number | null;
+  pnlPercent: number | null;
+  status: 'OPEN' | 'CLOSED' | 'PENDING' | 'ATTENTION' | 'UNKNOWN';
+  timestamp: string | null;
+  orderConfirmed?: boolean;
+  slVerified?: boolean;
+  tpVerified?: boolean;
+  positionSynced?: boolean;
+  isUnsafe?: boolean;
+  orderId?: string;
+  rawStatus?: string;
+  journalId?: string;
+  executionMode?: 'demo' | 'live' | null;
+  result?: 'TP' | 'SL' | 'UNKNOWN';
+  closedAt?: string | null;
+  slHitReason?: string | null;
+  exitPrice?: number | null;
+  closeReason?: string | null;
+  realizedPnl?: number | null;
+  fees?: number | null;
+  positionValue?: number | null;
+  liquidationPrice?: number | null;
+  managementTp1?: number;
+  managementTp2?: number;
+  managementRunner?: number;
+  breakEvenSet?: boolean;
+  tp1Done?: boolean;
+  tp2Done?: boolean;
+  liveMetricsAvailable?: boolean;
+  closeAllowed?: boolean;
+  closeBlockedReason?: string | null;
+}
+
+export interface TradeHistoryEntry extends Omit<Trade, 'result' | 'closedAt' | 'exitPrice'> {
+  exitPrice: number | null;
+  pnl: number | null;
+  result: 'PROFIT' | 'LOSS' | 'FLAT' | 'UNKNOWN';
+  reason: string;
+  closedAt: string | null;
+}
+
+export interface PortfolioMetrics {
+  totalBalance: number;
+  equity: number;
+  availableBalance: number;
+  usedMargin: number;
+  openPnl: number;
+  dailyPnl: number;
+  realizedPnl: number;
+  winRate: number;
+  profitFactor: number;
+  maxDrawdown: number;
+  marginBalance?: number;
+  unrealizedPnl?: number;
+  totalTrades?: number;
+  activeTradesCount?: number;
+  closedTradesCount?: number;
+  winTrades?: number;
+  lossTrades?: number;
+  pnlR?: number;
+}
+
+export type SignalGrade = 'A+' | 'A' | 'B+' | 'REJECT';
+
+export interface Signal {
+  id: string;
+  pair: string;
+  strategyName?: string;
+  tradeType?: 'scalping' | 'intraday' | null;
+  timeframe: string;
+  direction: 'LONG' | 'SHORT';
+  indicator: string;
+  price: number;
+  strength: 'STRONG' | 'MEDIUM' | 'WEAK';
+  timestamp: string;
+  grade: SignalGrade;
+  score: number;
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  rr: number;
+  rejectionReason?: string;
+  status: 'PENDING' | 'EXECUTED' | 'REJECTED';
+}
+
+export interface PairData {
+  symbol: string;
+  price: number;
+  rsi: number;
+  ema200: number;
+  isLiquiditySweep: boolean;
+  isBosOrChoch: boolean;
+  fvgConfirmed: boolean;
+}
+
+export interface PortfolioAsset {
+  symbol: string;
+  balance: number;
+  valueUsdt: number;
+  allocation: number;
+}
+
+export interface LogEntry {
+  id: string;
+  timestamp: string;
+  level: 'INFO' | 'WARNING' | 'ERROR' | 'SUCCESS';
+  message: string;
+}
+
+export interface AIReview {
+  id: string;
+  timestamp: string;
+  tradeId?: string;
+  pair: string;
+  rating: 'EXCELLENT' | 'GOOD' | 'NEEDS_IMPROVEMENT' | 'AVOID';
+  analysis: string;
+  recommendation: string;
+}
+
+export type ScannerStatus = 'DISABLED' | 'IDLE' | 'SCANNING' | 'COMPLETED' | 'COMPLETED_WITH_ERRORS' | 'ERROR' | 'DATA_UNAVAILABLE';
+export type ScanResultStatus = 'ACCEPTED' | 'REJECTED' | 'DATA_ERROR' | 'EXPIRED';
+export type SignalExecutionStatus = 'NEW' | 'VALIDATED' | 'BLOCKED' | 'READY' | 'NEAR_SETUP' | 'EXECUTING' | 'EXECUTED' | 'FAILED' | 'EXPIRED';
+
+export interface ScanResult {
+  symbol: string;
+  apiSymbol?: string;
+  turnover4h?: number;
+  direction: 'LONG' | 'SHORT';
+  strategy: string;
+  score: number;
+  grade: SignalGrade;
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  rr: number;
+  result: ScanResultStatus;
+  rejectionReason?: string;
+  candleCloseTime: string;
+  scanTime: string;
+}
+
+export interface ScanSummary {
+  totalScanned: number;
+  accepted: number;
+  rejected: number;
+  aPlus: number;
+  a: number;
+  dataErrors: number;
+  durationMs: number;
+}
+
+export interface ExecutableSignal extends Signal {
+  ageMs: number;
+  executionStatus: SignalExecutionStatus;
+}
+
+export interface ScannerState {
+  scannerEnabled: boolean;
+  scannerStatus: ScannerStatus;
+  scannerPaused: boolean;
+  scanInProgress: boolean;
+  lastScanStartedAt: string | null;
+  lastScanCompletedAt: string | null;
+  nextScanAt: string | null;
+  scanDurationMs: number;
+  lastScanError: string | null;
+}
+
+export interface BotState {
+  apiConnected: boolean;
+  bybitConnected: boolean;
+  walletSynced: boolean;
+  apiAuthenticated: boolean;
+  scannerOn: boolean;
+  autoTradeOn: boolean;
+  webScrapingOn: boolean;
+  emergencyStopped: boolean;
+  liveUnlocked: boolean;
+}
+
+export interface BotControlState {
+  status: 'idle' | 'running' | 'stopped';
+  emergency_stop: boolean;
+  execution_mode?: 'demo' | 'live';
+  auto_trading_enabled?: boolean;
+  live_mode_available?: boolean;
+  risk_per_trade?: number;
+  leverage_cap?: number;
+  exposure_cap?: number;
+  max_open_trades?: number;
+  max_daily_trades?: number;
+  readiness?: SystemReadiness;
+}
+
+export interface SystemHealth {
+  apiStatus: 'ONLINE' | 'OFFLINE';
+  scannerStatus: 'RUNNING' | 'IDLE';
+  strategyStatus: 'ACTIVE' | 'ERROR';
+  riskStatus: 'OK' | 'WARNING' | 'CRITICAL';
+}
+
+export interface SystemReadiness {
+  mode?: 'demo' | 'live';
+  checks: {
+    admin_auth_configured: boolean;
+    api_keys_present: boolean;
+    exchange_reachable: boolean;
+    wallet_fetch_success: boolean;
+  };
+  errors: {
+    exchange: string | null;
+    wallet: string | null;
+  };
+  persistence?: {
+    local_journal_storage: {
+      configured: boolean;
+      backend: string;
+      target: string;
+    };
+    external_audit_sink: {
+      configured: boolean;
+      provider: string;
+      target: string;
+      status: string;
+    };
+  };
+  ready_for_execution: boolean;
+  demo?: {
+    mode: string;
+    checks: {
+      api_keys_present: boolean;
+      exchange_reachable: boolean;
+      wallet_fetch_success: boolean;
+    };
+    errors: {
+      exchange: string | null;
+      wallet: string | null;
+    };
+    ready: boolean;
+  };
+  live?: {
+    mode: string;
+    checks: {
+      api_keys_present: boolean;
+      exchange_reachable: boolean;
+      wallet_fetch_success: boolean;
+    };
+    errors: {
+      exchange: string | null;
+      wallet: string | null;
+    };
+    ready: boolean;
+    live_mode_available?: boolean;
+  };
+}
+
+export interface ExchangeStatusResponse {
+  mode?: 'demo' | 'live';
+  demo_only: boolean;
+  base_url: string;
+  api_keys_present: boolean;
+  reachable: boolean;
+  error: string | null;
+  demo?: {
+    mode: string;
+    demo_only: boolean;
+    base_url: string;
+    api_keys_present: boolean;
+    reachable: boolean;
+    error: string | null;
+  };
+  live?: {
+    mode: string;
+    demo_only: boolean;
+    base_url: string;
+    api_keys_present: boolean;
+    reachable: boolean;
+    error: string | null;
+  };
+}
+
+export interface HealthResponse {
+  status: string;
+}
+
+export interface MetricsResponse {
+  total_trades: number;
+  active_trades_count: number;
+  closed_trades_count: number;
+  win_trades: number;
+  loss_trades: number;
+  win_rate: number;
+  pnl_r: number;
+  today_realized_pnl: number;
+  today_account_net_pnl: number;
+  today_trade_net_pnl: number;
+  today_fees: number;
+  today_funding: number;
+  today_financial_date: string;
+  today_financial_status: "authoritative" | "fallback" | "unavailable";
+  today_financial_source: "bybit_transaction_log" | "journal_fallback" | "unavailable";
+  financial_truth_error: string | null;
+  journal_today_realized_pnl: number;
+  journal_today_fees: number;
+  reconciliation_gap: number | null;
+  ledger_record_count: number;
+  daily_accounting_timezone: string;
+}
+
+export interface PortfolioSummary {
+  active_trades: number;
+  closed_trades: number;
+  total_trades: number;
+  win_rate: number;
+  pnl_r: number;
+  execution_mode?: 'demo' | 'live';
+}
+
+export interface AccountResponse {
+  ok: boolean;
+  mode?: 'demo' | 'live';
+  wallet: {
+    ok: boolean;
+    data: Record<string, string | number> | null;
+    error: string | null;
+  };
+  positions: {
+    ok: boolean;
+    data: Array<Record<string, string | number>>;
+    error: string | null;
+  };
+}
+
+export interface LedgerAuditRecord {
+  event_time: string | null;
+  symbol: string;
+  type: string;
+  direction: string;
+  quantity: number | null;
+  filled_price: number | null;
+  fee: number | null;
+  funding: number | null;
+  cash_flow: number | null;
+  change: number | null;
+  wallet_balance: number | null;
+  transaction_id: string;
+}
+
+export interface LedgerAuditResponse {
+  ok: boolean;
+  date: string;
+  start_time?: string;
+  end_time?: string;
+  error: string | null;
+  summary: {
+    record_count: number;
+    trade_count: number;
+    net_change: number;
+    trade_change: number;
+    cash_flow: number;
+    fees: number;
+    funding: number;
+    first_wallet_balance: number | null;
+    last_wallet_balance: number | null;
+    wallet_balance_delta: number | null;
+  };
+  by_symbol: Array<{
+    symbol: string;
+    record_count: number;
+    net_change: number;
+    cash_flow: number;
+    fees: number;
+    latest_event_time: string | null;
+  }>;
+  records: LedgerAuditRecord[];
+}
+
+export interface StrategyAuditTrade {
+  journal_id: string | null;
+  symbol: string;
+  strategy: string;
+  direction: string;
+  status: string;
+  opened_at: string | null;
+  closed_at: string | null;
+  entry: number | null;
+  stop_loss?: number | null;
+  take_profit?: number | null;
+  exit_price: number | null;
+  quantity: number | null;
+  close_reason?: string | null;
+  sl_hit_reason?: string | null;
+  realized_pnl: number | null;
+  fees: number | null;
+  result: "profit" | "loss" | "flat" | "unknown";
+  pnl_source: "bybit_ledger" | "journal" | "unmatched";
+  pnl_known: boolean;
+  audit_note: string | null;
+  ledger_record_count: number;
+  loss_diagnosis?: {
+    category: string;
+    detail: string;
+    distance_to_sl: number | null;
+    exit_vs_sl: number | null;
+    adverse_move: number | null;
+    entry: number | null;
+    stop_loss: number | null;
+    take_profit: number | null;
+    exit_price: number | null;
+  } | null;
+}
+
+export interface StrategyAuditResponse {
+  ok: boolean;
+  date: string;
+  error: string | null;
+  summary: {
+    trade_count: number;
+    known_pnl_trades: number;
+    ledger_matched_trades: number;
+    journal_fallback_trades: number;
+    unmatched_trades: number;
+    wins: number;
+    losses: number;
+    flats: number;
+    net_pnl: number;
+    win_rate: number | null;
+  };
+  strategies: Array<{
+    strategy: string;
+    trade_count: number;
+    known_pnl_trades: number;
+    ledger_matched_trades: number;
+    journal_fallback_trades: number;
+    unmatched_trades: number;
+    wins: number;
+    losses: number;
+    flats: number;
+    net_pnl: number;
+    gross_profit: number;
+    gross_loss: number;
+    avg_win: number | null;
+    avg_loss: number | null;
+    win_rate: number | null;
+  }>;
+  trades: StrategyAuditTrade[];
+}
+
+export interface MarketCandle {
+  timestamp: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+  turnover?: number;
+}
+
+export interface MarketTicker {
+  symbol: string;
+  lastPrice: number;
+  price24hPcnt: number;
+  volume24h: number;
+  turnover24h: number;
+  highPrice24h: number;
+  lowPrice24h: number;
+}
+
+export interface OrderBookLevel {
+  price: number;
+  size: number;
+}
+
+export interface MarketOverviewResponse {
+  ok: boolean;
+  server_time: string | null;
+  top_gainers: MarketTicker[];
+  watchlist: MarketTicker[];
+  error: string | null;
+}
+
+export interface MarketCandlesResponse {
+  ok: boolean;
+  symbol: string;
+  interval: string;
+  candles: MarketCandle[];
+  error: string | null;
+}
+
+export interface OrderBookResponse {
+  ok: boolean;
+  symbol: string;
+  orderbook: {
+    bids: OrderBookLevel[];
+    asks: OrderBookLevel[];
+  };
+  error: string | null;
+}
+
+export interface RiskValidationResponse {
+  allowed: boolean;
+  reason: string;
+  risk_per_trade?: number;
+  leverage_cap?: number;
+  exposure_cap?: number;
+}
+
+export interface RiskStateResponse {
+  risk_policy_authority?: string;
+  risk_profiles?: Record<"scalping" | "intraday", {
+    risk_amount: number;
+    leverage_cap: number;
+    min_risk_reward: number;
+  }>;
+  risk_per_trade: number;
+  leverage_cap: number;
+  exposure_cap: number;
+  max_open_trades: number;
+  max_trades_per_day: number;
+  min_risk_reward: number;
+  active_symbols: string[];
+  trades_today: number;
+  cooldown_until: string | null;
+  day_start_equity?: number | null;
+  current_account_equity?: number | null;
+  equity_drawdown_today?: number | null;
+  daily_net_loss_limit_amount?: number | null;
+  circuit_breaker_active?: boolean;
+  circuit_breaker_reason?: string | null;
+}
+
+export interface PositionSizeResponse {
+  allowed: boolean;
+  reason: string;
+  quantity: string | null;
+  quantity_value?: number;
+  entry?: number;
+  stop_loss?: number;
+  sl_distance?: number;
+  risk_percent?: number;
+  risk_amount?: number;
+  target_risk_amount?: number;
+  notional?: number;
+  required_margin?: number;
+  equity?: number;
+  available_balance?: number;
+  leverage_cap?: number;
+  exposure_cap?: number;
+  current_exposure?: number;
+  max_allowed_exposure?: number;
+  min_notional?: number;
+  qty_step?: string;
+  tick_size?: string;
+}
+
+export interface ExecuteTradeResponse {
+  ok: boolean;
+  error?: string | null;
+  warning?: string | null;
+  trade?: Record<string, unknown>;
+  sizing?: Record<string, unknown>;
+}
+
+export interface BacktestTrade {
+  strategy: string;
+  direction: "long" | "short";
+  entry: number;
+  stop_loss: number;
+  take_profit: number;
+  exit_price: number;
+  result: "win" | "loss";
+  exit_reason?: "stop_loss" | "take_profit";
+  diagnosis?: string;
+  opened_at: string;
+  closed_at: string;
+  risk_reward: number;
+  quantity: number;
+  gross_pnl: number;
+  fees: number;
+  net_pnl: number;
+  pnl_r: number;
+}
+
+export interface BacktestResponse {
+  ok: boolean;
+  error?: string;
+  symbol?: string;
+  strategy?: string;
+  trade_type?: "scalping" | "intraday";
+  profile?: {
+    label: string;
+    trend_interval: string | null;
+    setup_interval: string;
+    trigger_interval: string;
+  };
+  candles_1m?: number;
+  candles_5m?: number;
+  candles_trigger?: number;
+  candles_setup?: number;
+  candles_trend?: number;
+  candle_offset?: number;
+  risk_amount?: number;
+  fee_bps?: number;
+  min_risk_reward?: number;
+  max_hold_candles?: number;
+  summary?: {
+    trades: number;
+    wins: number;
+    losses: number;
+    win_rate: number;
+    net_pnl: number;
+    pnl_r: number;
+    profit_factor: number | null;
+    max_drawdown: number;
+    skipped_signals: number;
+  };
+  trades?: BacktestTrade[];
+  equity_curve?: number[];
+}
+
+export interface JournalTradeEntry {
+  journal_id: string;
+  symbol: string;
+  direction: string;
+  execution_mode: 'demo' | 'live';
+  entry: number;
+  stop_loss: number;
+  take_profit: number;
+  quantity: number | null;
+  status: string;
+  result: string | null;
+  sl_hit_reason: string | null;
+  order_id: string | null;
+  detected_at: string | null;
+  opened_at: string | null;
+  closed_at: string | null;
+  exchange_metadata: Record<string, unknown>;
+}
+
+export interface BotEventEntry {
+  id: number;
+  event_type: string;
+  level: string;
+  message: string;
+  metadata: Record<string, unknown>;
+  created_at: string | null;
+}
+
+export interface WatchdogModuleStatus {
+  module: string;
+  status: string;
+  reason: string;
+  endpoint: string | null;
+  error_code: string;
+}
+
+export interface WatchdogIncident {
+  id: number;
+  timestamp: string | null;
+  error_code: string;
+  endpoint: string | null;
+  retry_count: number;
+  affected_module: string;
+  level: string;
+  message: string;
+  technical_evidence: unknown;
+  recovery_status: string;
+  root_cause: string;
+}
+
+export interface WatchdogSnapshot {
+  generated_at: string;
+  mode: 'demo' | 'live';
+  admin_auth_configured: boolean;
+  modules: WatchdogModuleStatus[];
+  incidents: WatchdogIncident[];
+  summary: {
+    overall_status: string;
+    open_incidents: number;
+    total_incidents: number;
+    affected_modules: string[];
+  };
+}
