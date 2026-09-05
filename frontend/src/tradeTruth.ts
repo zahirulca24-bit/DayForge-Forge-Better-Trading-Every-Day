@@ -175,9 +175,7 @@ export function normalizeTradeHistoryEntry(trade: Trade): TradeHistoryEntry {
     else if (pnlValue < 0) outcome = 'LOSS';
     else if (trade.status === 'CLOSED') outcome = 'FLAT';
   } else {
-    if (trade.result === "TP") outcome = "PROFIT";
-    else if (trade.result === "SL") outcome = "LOSS";
-    else outcome = "UNKNOWN";
+    outcome = 'UNKNOWN';
   }
 
   return {
