@@ -278,8 +278,8 @@ def main() -> int:
     all_passed = True
     for name, validator in validations:
         passed, errors = validator()
-        status = "✓ PASS" if passed else "✗ FAIL"
-        print(f"\n{status}: {name}")
+        status = "PASS" if passed else "FAIL"
+        print(f"\n[{status}] {name}")
 
         if errors:
             all_passed = False
@@ -288,10 +288,10 @@ def main() -> int:
 
     print("\n" + "=" * 80)
     if all_passed:
-        print("✓ ALL VALIDATIONS PASSED")
+        print("ALL VALIDATIONS PASSED")
         return 0
     else:
-        print("✗ SOME VALIDATIONS FAILED")
+        print("SOME VALIDATIONS FAILED")
         return 1
 
 
