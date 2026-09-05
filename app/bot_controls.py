@@ -156,7 +156,7 @@ def get_execution_mode() -> str:
 
 
 def is_live_mode_available() -> bool:
-    return bool(settings.bybit_live_api_key and settings.bybit_live_api_secret)
+    return bool(settings.bybit_live_api_key and settings.bybit_live_api_secret and settings.dayforge_live_approval)
 
 
 def _update_runtime(**updates: Any) -> dict[str, Any]:

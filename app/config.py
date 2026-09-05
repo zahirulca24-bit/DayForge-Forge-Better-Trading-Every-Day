@@ -39,6 +39,7 @@ class Settings:
     bybit_live_base_url: str = os.getenv("BYBIT_LIVE_BASE_URL", "https://api.bybit.com")
     bybit_live_api_key: str = os.getenv("BYBIT_LIVE_API_KEY", "")
     bybit_live_api_secret: str = os.getenv("BYBIT_LIVE_API_SECRET", "")
+    dayforge_live_approval: bool = os.getenv("DAYFORGE_LIVE_APPROVAL", "false").strip().lower() == "true"
     supabase_url: str = os.getenv("SUPABASE_URL", "")
     supabase_service_role_key: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
     bot_scan_interval_seconds: int = int(os.getenv("BOT_SCAN_INTERVAL_SECONDS", "30"))
