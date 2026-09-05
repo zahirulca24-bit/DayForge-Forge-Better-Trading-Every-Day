@@ -201,7 +201,7 @@ def _login_client_id(request: Request) -> str:
 
 
 @app.get("/exchange/status")
-def exchange_status() -> dict:
+def exchange_status(_: dict = Depends(require_authenticated)) -> dict:
     mode = get_execution_mode()
     demo = get_exchange_client("demo").get_status()
     live = get_exchange_client("live").get_status()
@@ -322,7 +322,7 @@ def market_overview(_: dict = Depends(require_authenticated)) -> dict:
 
 
 @app.get("/readiness")
-def readiness() -> dict:
+def readiness(_: dict = Depends(require_authenticated)) -> dict:
     return get_readiness_status()
 
 
